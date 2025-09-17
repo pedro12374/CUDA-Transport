@@ -39,3 +39,8 @@
 
 # debug information files
 *.dwo
+
+dat/
+.DS_Store
+.python-version
+*.h5
