@@ -41,6 +41,8 @@
 *.dwo
 
 dat/
+plots/
 .DS_Store
 .python-version
 *.h5
+*.png
