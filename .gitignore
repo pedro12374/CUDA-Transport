@@ -47,3 +47,10 @@ dat/
 *.h5
 *.png
 .vscode/
+__pycache__/
+
+*.private
+*.log
+*.aux
+*.ipynb_checkpoints
+*.ipynb
