@@ -3,26 +3,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.transforms import ScaledTranslation
 from matplotlib.colors import TwoSlopeNorm 
+import parana_theme as tema
+tema.aplicar_tema()
 # --- Configuration ---
 # List of K values to plot in the mosaic
 K_VALUES = [0.5, 0.971635, 1.5, 6.47] 
-H5_FILENAME = '../dat/displacement_p.h5'
+H5_FILENAME = '../dat/displacement_components.h5'
 OUTPUT_PDF = '../plots/standard_map_displacement.pdf'
 
 # Phase space boundaries from the simulation
 P_MIN, P_MAX = -np.pi,  np.pi
 THETA_MIN, THETA_MAX = 0.0, 2.0 * np.pi
 
-plt.rcParams.update({
-    "text.usetex": True,
-    "font.family": "serif",       # Use Times New Roman or similar
-    "font.size": 10,              # Base font size
-    "axes.labelsize": 12,         # Axis labels
-    "xtick.labelsize": 10,        # X-ticks
-    "ytick.labelsize": 10,        # Y-ticks
-    "figure.dpi": 300,            # High resolution
-    "figure.autolayout": False    # Disable auto-layout (use constrained_layout instead)
-})
+
 
 # 1. Set up the figure and the mosaic layout
 # This creates a 2x2 grid where each subplot is labeled 'a', 'b', 'c', or 'd'.
@@ -47,8 +40,9 @@ for k_val, label in zip(K_VALUES, axs.keys()):
                 print(f"Warning: Dataset '{dset_name}' not found. Skipping.")
                 ax.text(0.5, 0.5, 'Data not found', ha='center', va='center')
                 continue
-            
-            displacement_map = f[dset_name][:]
+            full_displacement_data = f[dset_name][:]
+            # CORRECTED: Select only the momentum component (index 0) for plotting
+            displacement_map = full_displacement_data[:, :, 0]
 
 
         limit = np.max(np.abs(displacement_map))
@@ -56,11 +50,11 @@ for k_val, label in zip(K_VALUES, axs.keys()):
 
         centered_norm = TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
         # 3. Plot the 2D map on the current subplot axis
-        im = ax.imshow(displacement_map.T, 
+        im = ax.imshow(displacement_map, 
                        origin='lower', 
                        extent=[THETA_MIN, THETA_MAX, P_MIN, P_MAX],
                        aspect='auto',
-                       cmap='bwr',
+                       cmap=tema.parana_div_yel_blu,
                        norm=centered_norm)
         
         # Add a colorbar specific to this subplot
