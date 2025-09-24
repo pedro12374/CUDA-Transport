@@ -48,12 +48,16 @@ for k_val, label in zip(K_VALUES, axs.keys()):
             # Plotting with small, semi-transparent dots gives the classic phase space look
         ax.plot(all_theta_vals, all_p_vals, ',', color='black', markersize=0.2, alpha=0.6, rasterized=True)
 
+        ax.text(0.05, 0.95, f'{label})', transform=ax.transAxes,
+                fontsize=14, fontweight='bold', va='top', color=tema.TEXT_COLOR,
+                bbox=dict(facecolor=tema.BACKGROUND_COLOR, alpha=0.7, edgecolor='none', pad=2.0))
         # --- Formatting ---
         title_k = r'$K_c \approx 0.97$' if np.isclose(k_val, 0.971635) else f'K = {k_val}'
         ax.set_title(title_k)
         ax.set_xlim(THETA_MIN, THETA_MAX)
         ax.set_ylim(P_MIN, P_MAX)
 
+    
     except (FileNotFoundError, KeyError) as e:
         ax.text(0.5, 0.5, f"Error loading\n{dset_name}", ha='center', va='center')
         print(f"Error for K={k_val}: {e}")

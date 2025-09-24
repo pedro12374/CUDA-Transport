@@ -45,8 +45,9 @@ for k_val, label in zip(K_VALUES, axs.keys()):
         cbar = fig.colorbar(im, ax=ax)
         cbar.set_label(r'Max Lyapunov Exponent ($\lambda$)')
 
-        ax.text(0.05, 0.95, f'{label})', transform=ax.transAxes, 
-                fontsize=14, fontweight='bold', va='top', color='white')
+        ax.text(0.05, 0.95, f'{label})', transform=ax.transAxes,
+                fontsize=14, fontweight='bold', va='top', color=tema.TEXT_COLOR,
+                bbox=dict(facecolor=tema.BACKGROUND_COLOR, alpha=0.7, edgecolor='none', pad=2.0))
 
         title_k = r'$K_c \approx 0.97$' if np.isclose(k_val, 0.971635) else f'K = {k_val}'
         ax.set_title(title_k)
@@ -60,5 +61,5 @@ for label in ['a', 'c']:
 for label in ['c', 'd']:
     axs[label].set_xlabel(r'$\theta_0$')
 
-plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight')
+plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight',dpi=150)
 print(f"Saved plot to {OUTPUT_PDF}")

@@ -66,5 +66,5 @@ for label in ['a', 'c']:
 for label in ['c', 'd']:
     axs[label].set_xlabel(r'$\theta_0$')
 
-plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight')
+plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight',dpi=150)
 print(f"Saved plot to {OUTPUT_PDF}")

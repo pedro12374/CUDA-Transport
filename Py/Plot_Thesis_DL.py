@@ -23,23 +23,25 @@ for k_val in K_VALUES:
     df = pd.concat([df, data], axis=1)
 
 
-fig, ax = plt.subplot_mosaic([['A'],[ 'B'], ['C'],[ 'D']], figsize=(6, 6), layout='constrained',sharex=True)
-sns.kdeplot(data=df["K_0.500000"], ax=ax["A"])
-sns.kdeplot(data=df["K_0.971635"], ax=ax["B"])
-sns.kdeplot(data=df["K_1.500000"], ax=ax["C"])
-sns.kdeplot(data=df["K_6.470000"], ax=ax["D"])
+mosaic = [['a', 'b'], 
+          ['c', 'd']]
+
+fig, axs = plt.subplot_mosaic(mosaic,layout='constrained', gridspec_kw={
+        "wspace": -0.1,
+        "hspace": -0.1,
+    },sharex=True)
+fig.set_size_inches(10, 8)  
+
+for k_val, label in zip(K_VALUES, axs.keys()):
+    ax = axs[label] # Get the specific subplot axis to draw on
+    dset_name = f"K_{k_val:.6f}"
+    sns.kdeplot(data=df[dset_name], ax=ax,kde=True)
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$\lambda$')
+    title_k = r'$K_c \approx 0.97$' if np.isclose(k_val, 0.971635) else f'K = {k_val}'
+    ax.set_title(title_k)
 
 
-
-ax['A'].set_title(r'$K=0.5$',y=0.8)
-ax['B'].set_title(r'$K=0.971635$',y=0.8)
-ax['C'].set_title(r'$K=1.5$',y=0.8)
-ax['D'].set_title(r'$K=6.47$',y=0.8)
-
-ax['A'].set_xlabel(r'$\lambda$')
-ax['B'].set_xlabel(r'$\lambda$')
-ax['C'].set_xlabel(r'$\lambda$')
-ax['D'].set_xlabel(r'$\lambda$')
 
 
 

@@ -55,14 +55,16 @@ for k_val, label in zip(K_VALUES, axs.keys()):
                        extent=[THETA_MIN, THETA_MAX, P_MIN, P_MAX],
                        aspect='auto',
                        cmap=tema.parana_div_yel_blu,
-                       norm=centered_norm)
+                       norm=centered_norm,
+                       rasterized=True)
         
         # Add a colorbar specific to this subplot
         fig.colorbar(im, ax=ax, label=r'$\Delta p$')
 
         # Add the a), b), c) label to the corner of the subplot
-        ax.text(0.05, 0.95, f'{label})', transform=ax.transAxes, 
-                fontsize=14, fontweight='bold', va='top', color='black')
+        ax.text(0.05, 0.95, f'{label})', transform=ax.transAxes,
+                fontsize=14, fontweight='bold', va='top', color=tema.TEXT_COLOR,
+                bbox=dict(facecolor=tema.BACKGROUND_COLOR, alpha=0.7, edgecolor='none', pad=2.0))
 
         # Set a title for each subplot
         # If K is the critical value, give it a special label
@@ -84,5 +86,5 @@ for label in ['c', 'd']:
 
 # 4. Save the completed figure to a PDF file
 #    bbox_inches='tight' trims whitespace, which is great for LaTeX.
-plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight')
+plt.savefig(OUTPUT_PDF, format='pdf', bbox_inches='tight',dpi=150)
 
