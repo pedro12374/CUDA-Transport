@@ -193,14 +193,16 @@ inline void calculate_phase_space(
     int num_iterations,
     double* h_phase_space_out // Output array for all trajectories
 ) {
+    
     // Loop over each particle's initial condition
     for (long long i = 0; i < num_particles; ++i) {
         
         double state_map[DIMS];
         // Initialize the state for the current particle
         for (int j = 0; j < DIMS; ++j) {
+            
             state_map[j] = h_initial_conditions[i * DIMS + j];
-        }
+            }
 
         // Loop over the iterations to evolve this single particle
         for (int iter = 0; iter < num_iterations; ++iter) {
