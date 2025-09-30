@@ -135,6 +135,39 @@ __device__ inline void normalize_vector(double v[DIMS], double norm) {
 }
 
 
+template <int DIMS, typename SystemType, typename ParamsType>
+__device__ inline void rk4_step_t(
+    double state[DIMS],
+    double t,
+    double dt,
+    const SystemType& system,
+    const ParamsType& params)
+{
+    double k1[DIMS], k2[DIMS], k3[DIMS], k4[DIMS];
+    double temp_state[DIMS];
+
+    // Calculate k1 at t
+    system.template operator()<DIMS>(state, k1, params, t);
+
+    // Calculate k2 at t + dt/2
+    for (int i = 0; i < DIMS; ++i) temp_state[i] = state[i] + 0.5 * dt * k1[i];
+    system.template operator()<DIMS>(temp_state, k2, params, t + 0.5 * dt);
+
+    // Calculate k3 at t + dt/2
+    for (int i = 0; i < DIMS; ++i) temp_state[i] = state[i] + 0.5 * dt * k2[i];
+    system.template operator()<DIMS>(temp_state, k3, params, t + 0.5 * dt);
+
+    // Calculate k4 at t + dt
+    for (int i = 0; i < DIMS; ++i) temp_state[i] = state[i] + dt * k3[i];
+    system.template operator()<DIMS>(temp_state, k4, params, t + dt);
+
+    // Update state
+    for (int i = 0; i < DIMS; ++i) {
+        state[i] += (dt / 6.0) * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+    }
+}
+
+
 template <typename MapType>
 struct MapTraits;
 
@@ -143,45 +176,7 @@ struct MapTraits;
 // == Public Function Declarations for GPU Solvers
 // =============================================================================
 
-// The public signature of the host function remains the same. The changes
-// are internal to the kernel and the map's definition.
-template <int DIMS, typename MapType, typename ParamsType>
-void calculate_msd_and_displacement(
-    const MapType& map_functor,
-    const ParamsType& params,
-    const double* h_initial_conditions,
-    const double* min_bounds,
-    const double* max_bounds,
-    long long num_particles,
-    int num_iterations,
-    // Output arrays (host pointers)
-    double* h_total_displacement,
-    double* h_displacements,
-    double* h_msd
-);
 
-template <int DIMS, typename MapType, typename ParamsType>
-void calculate_lyapunov_exponent(
-    const MapType& map_functor,
-    const ParamsType& params,
-    const double* h_initial_conditions,
-    long long num_particles,
-    int num_iterations,
-    // Output array (host pointer)
-    double* h_lyapunov_exponents
-);
-
-template <int DIMS, typename MapType, typename ParamsType>
-void calculate_escape_time(
-    const MapType& map_functor,
-    const ParamsType& params,
-    const double* h_initial_conditions,
-    long long num_particles,
-    int max_iterations,
-    // Output arrays (host pointers)
-    double* h_escape_times,
-    double* h_escape_basins
-);
 
 // This function is implemented inline here in the header.
 template <int DIMS, typename MapType, typename ParamsType>
@@ -219,3 +214,11 @@ inline void calculate_phase_space(
 }
 
 
+#include "solvers/ode_escape.cuh"
+#include "solvers/ode_lyapunov.cuh"
+#include "solvers/ode_msd.cuh"
+#include "solvers/ode_strobo.cuh"
+
+#include "solvers/map_escape.cuh"
+#include "solvers/map_lyapunov.cuh"
+#include "solvers/map_msd.cuh"
