@@ -1,64 +1,65 @@
 #include <iostream>
 #include <string>
-#include <math.h>
+#include <vector>
 #include <filesystem>
-// Just include your library's header. It now contains GridSetup.
+#include <iomanip>
 #include "cuda_dynamics_lib/include/cuda_dynamics.h"
-#include "maps/standard_map.h" // Still need the specific map definition
-
-
+#include "maps/horton.h"
 
 int main() {
- 
-     const int DIMS = 2;
-    const int NUM_ITERATIONS = 10e3; // Number of points per orbit
-    // Define a vector of K values to analyze
-    std::vector<double> K_values = {0.5, 0.971635, 1.5, 6.47};
+    const int DIMS = 2;
+    const double DT = 0.01;
+     // Time between snapshots
+    const int STROBOSCOPIC_POINTS = 500;   // Number of points per orbit
 
-    std::cout << "--- CPU Phase Space Calculation ---" << std::endl;
+    // --- Define A2 values to simulate ---
+    std::vector<double> a2_values = {0.1, 0.5, 1.0, 1.5};
+    std::vector<double> a3_values = {0.1, 0.5, 1.0, 1.5};
 
-    // --- System Configuration (done once) ---
-    GridSetup grid(DIMS, {10, 10}, {0, 0.0}, {0.2, 0.5});
-    std::cout << "Configured for " << grid.num_particles 
-              << " particles over " << NUM_ITERATIONS << " iterations." << std::endl;
+    // --- Use a sparser grid for trajectory plotting ---
+    GridSetup grid(DIMS, {30, 30}, {-M_PI, -2*M_PI}, {M_PI, 2*M_PI});
+    ThreeWaveSystem system;
 
-    // --- Directory and File Cleanup (done once) ---
     namespace fs = std::filesystem;
-    std::string output_dir = "dat";
-    fs::create_directory(output_dir);
-    std::string output_file = output_dir + "/PS_Zoom.h5";
+    fs::create_directory("dat");
+    std::string output_file = "dat/three_wave_stroboscopic_A2_A3.h5";
     if (fs::exists(output_file)) {
         fs::remove(output_file);
     }
 
-        double* h_phase_espace = new double[grid.num_particles*NUM_ITERATIONS*DIMS];
+    // --- Main Calculation Loop ---
+    for (double a2 : a2_values) {
+        for(double a3: a3_values){
+        ThreeWaveSystemParams params = {
+            .A1 = 1.0, .A2 = a2, .A3 = a3,
+            .kx1 = 6.0, .ky1 = 3.0, .w1 = 0.476,
+            .kx2 = -3.5, .ky2 = -1.5, .w2 = 0.476,
+            .kx3 = -2.5, .ky3 = -1.5, .w3 = 0.476,
+        };
+        params.v2 = fabs(params.w2/params.ky2 - params.w1/params.ky1);
+        params.v3 = fabs(params.w3/params.ky3 - params.w1/params.ky1);
+        const double STROBOSCOPIC_TAU = 2.0 * M_PI/params.v2;
 
-    
-    StandardMap map;
+        std::cout << "\n--- Running Analysis for A2=" << a2 << ", A3=" << a3 << " ---" << std::endl;
 
-    // --- Main Calculation Loop for each K value ---
-    for (double K : K_values) {
-        std::cout << "\nCalculating phase space for K = " << K << "..." << std::endl;
-        StandardMapParams params = {K};
+        double* h_strobo_map = new double[grid.num_particles * STROBOSCOPIC_POINTS * DIMS];
 
-        calculate_phase_space<DIMS,StandardMap,StandardMapParams>(
-            map, params, grid.h_initial_conditions,
-            grid.num_particles, NUM_ITERATIONS,
-            h_phase_espace
-        );
+        calculate_ode_stroboscopic_map<DIMS, ThreeWaveSystem, ThreeWaveSystemParams>(
+            system, params, grid.h_initial_conditions, grid.num_particles,
+            STROBOSCOPIC_POINTS, STROBOSCOPIC_TAU, DT, h_strobo_map);
 
-        std::cout << "Calculation complete." << std::endl;
+        std::stringstream dset_name_stream;
+        dset_name_stream << "Strobo_A2_" << std::fixed << std::setprecision(2) << a2
+                             << "_A3_" << std::fixed << std::setprecision(2) << a3;
+            std::string dset_name = dset_name_stream.str();
+        
+        std::vector<size_t> dims = {(size_t)grid.num_particles, (size_t)STROBOSCOPIC_POINTS, (size_t)DIMS};
+        save_to_h5(output_file, dset_name, dims, h_strobo_map);
+        std::cout << "Saved data to dataset: " << dset_name << std::endl;
 
-        // --- Save Results to HDF5 ---
-        std::string dset_name_PS = "K_" + std::to_string(K);
-       
-        std::vector<size_t> dims = {(size_t)grid.num_particles, (size_t)NUM_ITERATIONS, (size_t)DIMS};
-        save_to_h5(output_file, dset_name_PS, dims, h_phase_espace);
-        }
-
-    // --- Cleanup ---
-    delete[] h_phase_espace;
-
-
+        delete[] h_strobo_map;
+    }
+    }
+    std::cout << "\nAll stroboscopic simulations complete." << std::endl;
     return 0;
 }

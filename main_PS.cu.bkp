@@ -1,0 +1,64 @@
+#include <iostream>
+#include <string>
+#include <math.h>
+#include <filesystem>
+// Just include your library's header. It now contains GridSetup.
+#include "cuda_dynamics_lib/include/cuda_dynamics.h"
+#include "maps/standard_map.h" // Still need the specific map definition
+
+
+
+int main() {
+ 
+     const int DIMS = 2;
+    const int NUM_ITERATIONS = 10e3; // Number of points per orbit
+    // Define a vector of K values to analyze
+    std::vector<double> K_values = {0.5, 0.971635, 1.5, 6.47};
+
+    std::cout << "--- CPU Phase Space Calculation ---" << std::endl;
+
+    // --- System Configuration (done once) ---
+    GridSetup grid(DIMS, {10, 10}, {0, 0.0}, {0.2, 0.5});
+    std::cout << "Configured for " << grid.num_particles 
+              << " particles over " << NUM_ITERATIONS << " iterations." << std::endl;
+
+    // --- Directory and File Cleanup (done once) ---
+    namespace fs = std::filesystem;
+    std::string output_dir = "dat";
+    fs::create_directory(output_dir);
+    std::string output_file = output_dir + "/PS_Zoom.h5";
+    if (fs::exists(output_file)) {
+        fs::remove(output_file);
+    }
+
+        double* h_phase_espace = new double[grid.num_particles*NUM_ITERATIONS*DIMS];
+
+    
+    StandardMap map;
+
+    // --- Main Calculation Loop for each K value ---
+    for (double K : K_values) {
+        std::cout << "\nCalculating phase space for K = " << K << "..." << std::endl;
+        StandardMapParams params = {K};
+
+        calculate_phase_space<DIMS,StandardMap,StandardMapParams>(
+            map, params, grid.h_initial_conditions,
+            grid.num_particles, NUM_ITERATIONS,
+            h_phase_espace
+        );
+
+        std::cout << "Calculation complete." << std::endl;
+
+        // --- Save Results to HDF5 ---
+        std::string dset_name_PS = "K_" + std::to_string(K);
+       
+        std::vector<size_t> dims = {(size_t)grid.num_particles, (size_t)NUM_ITERATIONS, (size_t)DIMS};
+        save_to_h5(output_file, dset_name_PS, dims, h_phase_espace);
+        }
+
+    // --- Cleanup ---
+    delete[] h_phase_espace;
+
+
+    return 0;
+}

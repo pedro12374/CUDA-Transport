@@ -62,24 +62,25 @@ MAIN_OBJ = $(MAIN_SRC:.cu=.o)
 # ## BUILD RULES ##
 # =============================================================================
 
-# Default target: build the executable
-all: $(TARGET)
+# Define all executables you want to build
+all: dynamics_simulator horton_escape
 
-# Rule to link the final executable
-$(TARGET): $(MAIN_OBJ) $(LIB_OBJ)
-	@echo "==> Linking executable: $@"
-	$(NVCC) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+# Rule to build the main standard map simulator
+dynamics_simulator: main.cu
+	@echo "==> Building Standard Map simulator"
+	$(NVCC) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
 
-# Pattern rule to compile any .cu file into a .o object file
-%.o: %.cu
-	@echo "==> Compiling source: $<"
-	$(NVCC) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<
+# Rule to build the Horton escape time simulator
+horton_escape: main_horton_escape.cu
+	@echo "==> Building Horton Escape simulator"
+	$(NVCC) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+
+# Add other rules for other executables here...
 
 # Rule to clean up all compiled files
 clean:
 	@echo "==> Cleaning up build files..."
-	rm -f $(TARGET) $(MAIN_OBJ) $(LIB_OBJ)
+	rm -f dynamics_simulator horton_escape_simulator
 
 # Phony targets are not files
 .PHONY: all clean
-
