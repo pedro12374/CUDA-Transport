@@ -20,30 +20,50 @@ __global__ void ode_msd_kernel(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
-    double state[DIMS], initial_state[DIMS];
+    // --- State variables ---
+    double state_wrapped[DIMS];
+    double state_unwrapped[DIMS];
+    double initial_state[DIMS];
+
     for (int j = 0; j < DIMS; ++j) {
         initial_state[j] = d_initial_conditions[idx * DIMS + j];
-        state[j] = initial_state[j];
+        state_wrapped[j] = initial_state[j];
+        state_unwrapped[j] = initial_state[j];
     }
 
     for (int step = 0; step < num_steps; ++step) {
         double t = static_cast<double>(step) * dt;
-        rk4_step_t<DIMS, SystemType, ParamsType>(state, t, dt, system, params);
 
-        // MSD calculation for the y-dimension (state[1])
-        double disp_y = state[1] - initial_state[1];
-        atomicAdd(&d_msd[step], disp_y * disp_y);
+        // --- 1. GENERIC N-DIMENSIONAL MSD CALCULATION ---
+        double squared_displacement = 0.0;
+        for (int j = 0; j < DIMS; ++j) {
+            double disp_j = state_unwrapped[j] - initial_state[j];
+            squared_displacement += disp_j * disp_j;
+        }
+        atomicAdd(&d_msd[step], squared_displacement);
+
+        // --- 2. Evolve the system using the WRAPPED state ---
+        rk4_step_t<DIMS, SystemType, ParamsType>(state_wrapped, t, dt, system, params);
+        
+        // --- 3. Update the unwrapped state ---
+        for (int j = 0; j < DIMS; ++j) {
+            state_unwrapped[j] = state_wrapped[j];
+        }
+
+        // --- 4. Apply wrapping to the wrapped state for the NEXT iteration ---
+        SystemTraits<SystemType>::post_step_update(state_wrapped);
     }
     
-    // Final displacement calculation
+    // --- Final N-Dimensional Displacement Calculation ---
     double final_total_sq_disp = 0.0;
     for (int j = 0; j < DIMS; ++j) {
-        double disp_j = state[j] - initial_state[j];
+        double disp_j = state_unwrapped[j] - initial_state[j];
         d_displacements[idx * DIMS + j] = disp_j;
         final_total_sq_disp += disp_j * disp_j;
     }
     d_total_displacement[idx] = sqrt(final_total_sq_disp);
 }
+
 
 
 template <int DIMS, typename SystemType, typename ParamsType>

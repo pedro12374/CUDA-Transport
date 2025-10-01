@@ -1,50 +1,88 @@
 import plotting_lib as pl
 import numpy as np # Needed for np.pi
+import parana_theme as tema
 
 # ==============================================================================
 # == DEFINE ALL PLOTS TO BE GENERATED
 # ==============================================================================
 
-plots_to_generate = [
+individual_matrix_batches = [
     {
-        "h5_file": "../dat/horton_escape_analysis_vs_A2.h5",
-        "output_pdf": "../plots/horton_escape_A2_mosaic.pdf",
+        "h5_file": "../dat/horton_escape_A2_A3.h5",
+        "output_dir": "../plots", # Directory to save files
         "plot_type": "escape",
-        "dset_prefix": "Escape_A2",
-        "params_list": [0.1, 0.5, 1.0, 1.5],
-        "bounds": [-np.pi, np.pi, -np.pi, np.pi] # Bounds for the Horton system
+        "dset_prefix": "EscapeTime",
+        "row_params": [0.0,0.005, 0.013],      # A3 values
+        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_prefix": "A3",
+        "col_prefix": "A2",
+        "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi],
+        "basin_cmap_config": {
+            "colors": [
+                tema.VERMELHO,      # Color for basin -2 (e.g., escape left)
+                tema.BACKGROUND_COLOR, # Color for basin 0 (no escape)
+                tema.AMARELO        # Color for basin 2 (e.g., escape right)
+            ],
+            "bounds": [ -1.5, -0.5, 0.5, 1.5],
+            "ticks": [ -1, 0, 1]
+        }
     },
-    {
-        "h5_file": "../dat/three_wave_stroboscopic_vs_A2.h5",
-        "output_pdf": "../plots/horton_strobo_A2_mosaic.pdf",
-        "plot_type": "strobo",
-        "dset_prefix": "Strobo_A2",
-        "params_list": [0.1, 0.5, 1.0, 1.5],
-        "bounds": [-np.pi, np.pi, -np.pi, np.pi] # Bounds for the Horton system
+        {
+        "h5_file": "../dat/horton_escape_A2_A3.h5",
+        "output_dir": "../plots", # Directory to save files
+        "plot_type": "basin",
+        "dset_prefix": "EscapeBasin",
+        "row_params": [0.0,0.005, 0.013],      # A3 values
+        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_prefix": "A3",
+        "col_prefix": "A2",
+        "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi],
+        "basin_cmap_config": {
+            "colors": [
+                tema.VERMELHO,      # Color for basin -2 (e.g., escape left)
+                tema.BACKGROUND_COLOR, # Color for basin 0 (no escape)
+                tema.AMARELO        # Color for basin 2 (e.g., escape right)
+            ],
+            "bounds": [ -1.5, -0.5, 0.5, 1.5],
+            "ticks": [ -1, 0, 1]
+        }
     },
+
     {
-        "h5_file": "../dat/lyapunov_exponents.h5",
-        "output_pdf": "../plots/standard_map_lyapunov_mosaic.pdf",
-        "plot_type": "lyapunov",
-        "dset_prefix": "K",
-        "params_list": [0.5, 0.971635, 1.5, 6.47],
-        "bounds": [0, 2*np.pi, -np.pi, np.pi] # Different bounds for the Standard Map!
-    }
+        "h5_file": "../dat/horton_msd_A2_A3.h5",
+        "output_dir": "../plots", # Directory to save files
+        "plot_type": "msd",
+        "dset_prefix": "MSD",
+        "row_params": [0.0,0.005, 0.013],      # A3 values
+        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_prefix": "A3",
+        "col_prefix": "A2",
+        "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi]
+    },
+
+    {
+        "h5_file": "../dat/horton_msd_A2_A3.h5",
+        "output_dir": "../plots", # Directory to save files
+        "plot_type": "total_displacement",
+        "dset_prefix": "TotalDisplacement",
+        "row_params": [0.0,0.005, 0.013],      # A3 values
+        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_prefix": "A3",
+        "col_prefix": "A2",
+        "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi]
+    }    
 ]
+
 
 # ==============================================================================
 # == EXECUTION LOOP
 # ==============================================================================
 
 if __name__ == '__main__':
-    for plot_config in plots_to_generate:
-        pl.generate_mosaic_plot(
-            h5_file=plot_config["h5_file"],
-            output_pdf=plot_config["output_pdf"],
-            plot_type=plot_config["plot_type"],
-            dset_prefix=plot_config["dset_prefix"],
-            params_list=plot_config["params_list"],
-            bounds=plot_config.get("bounds") # Use .get() for safety if bounds are omitted
-        )
+    if individual_matrix_batches:
+        print("\n--- Generating Individual Plots from 2D Sweep ---")
+        for config in individual_matrix_batches:
+            
+            pl.generate_individual_matrix_plots(**config)
 
     print("\nAll plots have been generated.")

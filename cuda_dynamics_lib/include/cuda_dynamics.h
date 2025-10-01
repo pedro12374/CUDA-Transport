@@ -6,6 +6,9 @@
 #include <numeric>     // Needed for std::accumulate (optional, but good practice)
 #include <stdexcept>   // Needed for std::runtime_error
 
+template <typename SystemType>
+struct SystemTraits;
+
 // A utility macro for error checking
 #define CUDA_CHECK(err) { \
     if (err != cudaSuccess) { \

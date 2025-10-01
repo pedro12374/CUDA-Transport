@@ -63,17 +63,21 @@ MAIN_OBJ = $(MAIN_SRC:.cu=.o)
 # =============================================================================
 
 # Define all executables you want to build
-all: dynamics_simulator horton_escape
+all: horton_msd
 
 # Rule to build the main standard map simulator
 dynamics_simulator: main.cu
 	@echo "==> Building Standard Map simulator"
-	$(NVCC) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
 # Rule to build the Horton escape time simulator
 horton_escape: main_horton_escape.cu
 	@echo "==> Building Horton Escape simulator"
-	$(NVCC) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
+horton_msd: main_horton_msd.cu
+	@echo "==> Building Horton Escape simulator"
+	$(NVCC) $(CXXFLAGS) $(INCLUDES)  -o $@ $< $(LDFLAGS)
 
 # Add other rules for other executables here...
 
