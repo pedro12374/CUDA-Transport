@@ -36,13 +36,13 @@ struct HortonSystem {
 
         // Term 2
         double arg2_y = params.ky2 * (y - params.v2 * t);
-        double term2_x = params.A2 * params.ky2 * sin(params.kx2 * x + 1.0) * sin(arg2_y);
-        double term2_y = params.A2 * params.kx2 * cos(params.kx2 * x + 1.0) * cos(arg2_y);
+        double term2_x = params.A2 * params.ky2 * sin(params.kx2 * x + 0.5) * sin(arg2_y);
+        double term2_y = params.A2 * params.kx2 * cos(params.kx2 * x + 0.5) * cos(arg2_y);
 
         // Term 3
         double arg3_y = params.ky3 * (y - params.v3 * t);
-        double term3_x = params.A3 * params.ky3 * sin(params.kx3 * x + 1.0) * sin(arg3_y);
-        double term3_y = params.A3 * params.kx3 * cos(params.kx3 * x + 1.0) * cos(arg3_y);
+        double term3_x = params.A3 * params.ky3 * sin(params.kx3 * x + 0.5) * sin(arg3_y);
+        double term3_y = params.A3 * params.kx3 * cos(params.kx3 * x + 0.5) * cos(arg3_y);
 
         dstate_dt[0] = term1_x + term2_x + term3_x; // dxdt
         dstate_dt[1] = term1_y + term2_y + term3_y; // dydt
@@ -105,11 +105,26 @@ struct HortonSystem {
 template<>
 struct SystemTraits<HortonSystem> {
 
-        __host__ __device__ static void post_step_update(double state[2]) {
-        // Wrap the 'y' coordinate to be periodic in [-PI, PI]
-        // This is the crucial physics you identified!
-        state[1] = fmod(state[1] + 2.0 * M_PI, 4.0 * M_PI) - 2.0 * M_PI;
+    __host__ __device__ static void post_step_update(double state[2]) {
+    // Defines the periodic domain [-L/2, L/2]
+    const double PERIOD = 4.0 * M_PI; // The total length of the interval (2pi - (-2pi))
+    const double MIN_BOUND = -2.0 * M_PI;
+
+    // Shift the value so the range starts at 0
+    double temp = state[1] - MIN_BOUND;
+
+    // Apply fmod
+    temp = fmod(temp, PERIOD);
+
+    // If the result is negative, add the period to wrap it around correctly
+    if (temp < 0.0) {
+        temp += PERIOD;
     }
+
+    // Shift the value back to the original range
+    state[1] = temp + MIN_BOUND;
+}
+
 
     __host__ __device__ static int check_escape(const double state[2]) {
         // Example: Define two distinct, non-symmetric escape regions

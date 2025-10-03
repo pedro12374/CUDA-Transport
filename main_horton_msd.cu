@@ -11,17 +11,17 @@ int main() {
     const double DT = 0.01;
      // Time between snapshots
     
-    const double FINAL_TIME = 10000.0; // Your desired final time
+    const double FINAL_TIME = 10e4; // Your desired final time
 
     // Calculate the total number of steps automatically
     const int TOTAL_STEPS = static_cast<int>(FINAL_TIME / DT);
 
     // --- Define A2 values to simulate ---
-    std::vector<double> a2_values = {0.0,0.005, 0.013, 0.026};
-    std::vector<double> a3_values = {0.0,0.005, 0.013};
+    std::vector<double> a2_values = {0.0,0.1, 0.5, 1.0};
+    std::vector<double> a3_values = {0.0,0.1, 0.5};
 
     // --- Use a sparser grid for trajectory plotting ---
-    GridSetup grid(DIMS, {256, 256}, {-M_PI, -2*M_PI}, {M_PI, 2*M_PI});
+    GridSetup grid(DIMS, {1024, 1024}, {-M_PI, -2*M_PI}, {M_PI, 2*M_PI});
     HortonSystem system;
 
     namespace fs = std::filesystem;
@@ -35,7 +35,7 @@ int main() {
     for (double a2 : a2_values) {
         for(double a3: a3_values){
         HortonSystemParams params = {
-            .A1 = 0.026, .A2 = a2, .A3 = a3,
+            .A1 = 1.0, .A2 = a2, .A3 = a3,
             .kx1 = 6.0, .ky1 = 3.0, .w1 = 0.476,
             .kx2 = -3.5, .ky2 = -1.5, .w2 = 0.476,
             .kx3 = -2.5, .ky3 = -1.5, .w3 = 0.476,
@@ -43,7 +43,7 @@ int main() {
         params.v2 = fabs(params.w2/params.ky2 - params.w1/params.ky1);
         params.v3 = fabs(params.w3/params.ky3 - params.w1/params.ky1);
         const double STROBOSCOPIC_TAU = 2.0 * M_PI/params.v2;
-        if (a2 != a3){
+
         std::cout << "\n--- Running Analysis for A2=" << a2 << ", A3=" << a3 << " ---" << std::endl;
             
         double* h_total_displacement = new double[grid.num_particles];
@@ -79,7 +79,7 @@ int main() {
             delete[] h_total_displacement;
             delete[] h_displacements;
             delete[] h_msd;
-        }
+        
     }
     }
     std::cout << "\nAll stroboscopic simulations complete." << std::endl;
