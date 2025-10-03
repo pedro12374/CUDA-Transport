@@ -22,9 +22,9 @@ def _plot_escape_time(ax, data, title, bounds):
     else:
         # Otherwise, use the logarithmic norm as intended
         norm = LogNorm()
-    im = ax.imshow(data, origin='lower',
+    im = ax.imshow(data.T, origin='lower',
                    norm=norm, cmap=tema.parana_jet,
-                   extent=bounds,aspect='equal') # Use the provided bounds
+                   extent=bounds,aspect='auto') # Use the provided bounds
     ax.set_title(title)
     return im, "Escape Time (t)"
 
@@ -45,15 +45,15 @@ def _plot_escape_basin(ax, data, title, bounds, cmap_config=None):
     cmap = ListedColormap(colors)
     norm = BoundaryNorm(norm_bounds, cmap.N)
 
-    im = ax.imshow(data.T, origin='lower', cmap=cmap, norm=norm, extent=bounds)
+    im = ax.imshow(data.T, origin='lower', cmap=cmap, norm=norm, extent=bounds,aspect='auto')
     ax.set_title(title)
     
     return im, {"label": "Escape Basin", "ticks": cbar_ticks}
 
 def _plot_lyapunov(ax, data, title, bounds):
     """Internal function to plot a 2D Lyapunov exponent map."""
-    im = ax.imshow(data, origin='lower', cmap=tema.parana_seq_plasma,
-                   extent=bounds) # Use the provided bounds
+    im = ax.imshow(data.T, origin='lower', cmap=tema.parana_seq_plasma,
+                   extent=bounds,aspect='auto') # Use the provided bounds
     ax.set_title(title)
     return im, r"Max Lyapunov Exponent ($\lambda$)"
 
@@ -75,7 +75,7 @@ def _plot_msd(ax, data, title, bounds=None): # bounds is unused but keeps signat
         return D * (t**alpha)
 
     # Fit the data (ignoring the first few points)
-    fit_start = 100
+    fit_start = 1
     if len(t) > fit_start:
         popt, _ = curve_fit(power_law, t[fit_start:], data[fit_start:])
         alpha = popt[1]
@@ -97,16 +97,16 @@ def _plot_displacement(ax, data, title, bounds):
     limit = np.max(np.abs(disp_y))
     norm = TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
     
-    im = ax.imshow(disp_y, origin='lower', cmap=tema.parana_div_yel_blu,
-                   norm=norm, extent=bounds)
+    im = ax.imshow(disp_y.T, origin='lower', cmap=tema.parana_div_yel_blu,
+                   norm=norm, extent=bounds,aspect='auto')
     ax.set_title(title)
     return im, r"Final Displacement ($\Delta y$)"
 def _plot_total_displacement(ax, data, title, bounds):
     """Internal function to plot a 2D total displacement map."""
     # Use a sequential colormap since magnitude is always positive
-    im = ax.imshow(data, origin='lower', cmap=tema.parana_seq_plasma,
+    im = ax.imshow(data.T, origin='lower', cmap=tema.parana_seq_plasma,
                    norm=LogNorm(), # Log scale is often good for displacement magnitudes
-                   extent=bounds)
+                   extent=bounds,aspect='auto')
     ax.set_title(title)
     return im, r"Total Displacement Magnitude $\sqrt{\Delta x^2 + \Delta y^2}$"
 

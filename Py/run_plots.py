@@ -5,9 +5,8 @@ import parana_theme as tema
 # ==============================================================================
 # == DEFINE ALL PLOTS TO BE GENERATED
 # ==============================================================================
-
-individual_matrix_batches = [
-    {
+escapes = [
+        {
         "h5_file": "../dat/horton_escape_A2_A3.h5",
         "output_dir": "../plots", # Directory to save files
         "plot_type": "escape",
@@ -46,15 +45,25 @@ individual_matrix_batches = [
             "bounds": [ -1.5, -0.5, 0.5, 1.5],
             "ticks": [ -1, 0, 1]
         }
-    },
+    }
+]
+
+
+
+A3_list = [0.0,0.1, 0.5]
+A2_list = [0.0,0.1, 0.5, 1.0]
+
+
+individual_matrix_batches = [
+
 
     {
         "h5_file": "../dat/horton_msd_A2_A3.h5",
         "output_dir": "../plots", # Directory to save files
         "plot_type": "msd",
         "dset_prefix": "MSD",
-        "row_params": [0.0,0.005, 0.013],      # A3 values
-        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_params": A3_list,      # A3 values
+        "col_params": A2_list, # A2 values
         "row_prefix": "A3",
         "col_prefix": "A2",
         "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi]
@@ -65,8 +74,20 @@ individual_matrix_batches = [
         "output_dir": "../plots", # Directory to save files
         "plot_type": "total_displacement",
         "dset_prefix": "TotalDisplacement",
-        "row_params": [0.0,0.005, 0.013],      # A3 values
-        "col_params": [0.0,0.005, 0.013, 0.026], # A2 values
+        "row_params": A3_list,      # A3 values
+        "col_params": A2_list, # A2 values
+        "row_prefix": "A3",
+        "col_prefix": "A2",
+        "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi]
+    },
+
+    {
+        "h5_file": "../dat/horton_msd_A2_A3.h5",
+        "output_dir": "../plots", # Directory to save files
+        "plot_type": "displacement",
+        "dset_prefix": "Displacement",
+        "row_params": A3_list,      # A3 values
+        "col_params": A2_list, # A2 values
         "row_prefix": "A3",
         "col_prefix": "A2",
         "bounds": [-np.pi, np.pi, -2*np.pi, 2*np.pi]

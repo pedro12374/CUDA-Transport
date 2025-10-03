@@ -63,7 +63,7 @@ MAIN_OBJ = $(MAIN_SRC:.cu=.o)
 # =============================================================================
 
 # Define all executables you want to build
-all: horton_msd
+all: horton_msd horton_escape
 
 # Rule to build the main standard map simulator
 dynamics_simulator: main.cu
