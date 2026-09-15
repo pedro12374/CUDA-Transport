@@ -3,6 +3,8 @@
 #include <vector>
 #include <filesystem>
 #include <iomanip>
+#include <sstream>
+#include <cmath>
 #include "cuda_dynamics_lib/include/cuda_dynamics.h"
 #include "maps/horton.h"
 
@@ -48,13 +50,13 @@ int main() {
          std::cout << "\n--- Running Escape Analysis for A2=" << a2 << " ---" << "A3 = "<< a3  << std::endl;
 
         // --- Allocate memory for BOTH outputs ---
-        double* h_escape_times = new double[grid.num_particles];
-        double* h_escape_basins = new double[grid.num_particles];
+        std::vector<double> h_escape_times(grid.num_particles);
+        std::vector<double> h_escape_basins(grid.num_particles);
 
             // Call the library function
             calculate_ode_escape<DIMS, HortonSystem, HortonSystemParams>(
-            system, params, grid.h_initial_conditions, grid.num_particles,
-            TOTAL_STEPS, DT, h_escape_times, h_escape_basins);
+            system, params, grid.h_initial_conditions.data(), grid.num_particles,
+            TOTAL_STEPS, DT, h_escape_times.data(), h_escape_basins.data());
 
              std::stringstream base_name;
         base_name << "A2_" << std::fixed << std::setprecision(4) << a2<< "_A3_" << std::fixed << std::setprecision(4) << a3;
@@ -62,15 +64,12 @@ int main() {
         std::string basin_dset_name = "EscapeBasin_" + base_name.str();
         
         std::vector<size_t> grid_dims = {(size_t)grid.grid_res[0], (size_t)grid.grid_res[1]};
-        save_to_h5(output_file, time_dset_name, grid_dims, h_escape_times);
-        save_to_h5(output_file, basin_dset_name, grid_dims, h_escape_basins);
-        
-        std::cout << "Saved Escape Time and Basin data." << std::endl;
+        save_to_h5(output_file, time_dset_name, grid_dims, h_escape_times.data());
+        save_to_h5(output_file, basin_dset_name, grid_dims, h_escape_basins.data());
 
-        delete[] h_escape_times;
-        delete[] h_escape_basins;
+        std::cout << "Saved Escape Time and Basin data." << std::endl;
     }
     }
-    std::cout << "\nAll stroboscopic simulations complete." << std::endl;
+    std::cout << "\nAll escape-time simulations complete." << std::endl;
     return 0;
 }
