@@ -1,10 +1,12 @@
 #pragma once // File: cuda_dynamics_lib/include/cuda_dynamics.h
 
-#include <highfive/H5File.hpp>
+#include <H5Cpp.h>
 #include <cuda_runtime.h>
 #include <vector>      // Needed for std::vector
 #include <numeric>     // Needed for std::accumulate (optional, but good practice)
 #include <stdexcept>   // Needed for std::runtime_error
+#include <filesystem>  // Needed to check for an existing HDF5 file
+#include <iostream>    // Needed for std::cerr
 
 template <typename SystemType>
 struct SystemTraits;
@@ -23,7 +25,7 @@ struct GridSetup {
     const int DIMS;
     std::vector<int> grid_res;
     long long num_particles;
-    double* h_initial_conditions;
+    std::vector<double> h_initial_conditions;
 
     // --- Constructor: Does all the setup work ---
     GridSetup(int dimensions, const std::vector<int>& resolution,
@@ -38,15 +40,10 @@ struct GridSetup {
         this->num_particles = 1;
         for (int res : this->grid_res) { this->num_particles *= res; }
 
-        this->h_initial_conditions = new double[this->num_particles * this->DIMS];
+        this->h_initial_conditions.resize(this->num_particles * this->DIMS);
 
         std::vector<int> current_indices(this->DIMS, 0);
         generate_grid_recursive(0, current_indices, min_bounds, max_bounds);
-    }
-
-    // --- Destructor: Cleans up allocated memory ---
-    ~GridSetup() {
-        delete[] h_initial_conditions;
     }
 
 private:
@@ -74,34 +71,54 @@ private:
 
 
 
-inline void save_to_h5(const std::string& filename, const std::string& dset_name, const std::vector<size_t>& dims, const double* data) {
-    HighFive::File file(filename, HighFive::File::OpenOrCreate);
-    HighFive::DataSet dataset = file.createDataSet<double>(dset_name, HighFive::DataSpace(dims));
-    dataset.write_raw(data);
+// Opens filename for appending a new dataset if it already exists, or
+// creates it fresh otherwise (mirrors HighFive::File::OpenOrCreate).
+inline H5::H5File open_or_create_h5(const std::string& filename) {
+    if (std::filesystem::exists(filename)) {
+        return H5::H5File(filename, H5F_ACC_RDWR);
+    }
+    return H5::H5File(filename, H5F_ACC_TRUNC);
 }
 
-inline void save_displacement_components(const std::string& filename, const std::string& dset_name, 
+inline void save_to_h5(const std::string& filename, const std::string& dset_name, const std::vector<size_t>& dims, const double* data) {
+    H5::Exception::dontPrint();
+    try {
+        H5::H5File file = open_or_create_h5(filename);
+        std::vector<hsize_t> h5_dims(dims.begin(), dims.end());
+        H5::DataSpace dataspace(static_cast<int>(h5_dims.size()), h5_dims.data());
+        H5::DataSet dataset = file.createDataSet(dset_name, H5::PredType::NATIVE_DOUBLE, dataspace);
+        dataset.write(data, H5::PredType::NATIVE_DOUBLE);
+    } catch (const H5::Exception& e) {
+        // H5::Exception doesn't derive from std::exception, so rethrow as
+        // something that prints a useful message if left uncaught.
+        throw std::runtime_error("HDF5 error while saving dataset '" + dset_name + "': " + e.getDetailMsg());
+    }
+}
+
+inline void save_displacement_components(const std::string& filename, const std::string& dset_name,
                                   const GridSetup& grid, const double* data) {
     try {
-        // Open the file in OpenOrCreate mode to add datasets without overwriting
-        HighFive::File file(filename, HighFive::File::OpenOrCreate);
+        H5::Exception::dontPrint();
+        // Open (or create) the file so datasets accumulate rather than overwrite.
+        H5::H5File file = open_or_create_h5(filename);
 
         // 1. Construct the multi-dimensional shape for the dataset.
         // Start with the grid resolution (e.g., {512, 512})
-        std::vector<size_t> dims(grid.grid_res.begin(), grid.grid_res.end());
-        
+        std::vector<hsize_t> dims(grid.grid_res.begin(), grid.grid_res.end());
+
         // 2. Append the number of components (DIMS) as the last dimension.
         // The final shape becomes {512, 512, 2} for a 2D system.
-        dims.push_back(grid.DIMS);
+        dims.push_back(static_cast<hsize_t>(grid.DIMS));
 
         // 3. Create the dataset with the correct multi-dimensional shape
-        HighFive::DataSet dataset = file.createDataSet<double>(dset_name, HighFive::DataSpace(dims));
-        
-        // 4. Write the raw, flattened data. HighFive handles the reshaping.
-        dataset.write_raw(data);
+        H5::DataSpace dataspace(static_cast<int>(dims.size()), dims.data());
+        H5::DataSet dataset = file.createDataSet(dset_name, H5::PredType::NATIVE_DOUBLE, dataspace);
 
-    } catch (const HighFive::Exception& e) {
-        std::cerr << "HDF5 Error while saving component data: " << e.what() << std::endl;
+        // 4. Write the raw, flattened data.
+        dataset.write(data, H5::PredType::NATIVE_DOUBLE);
+
+    } catch (const H5::Exception& e) {
+        std::cerr << "HDF5 Error while saving component data: " << e.getDetailMsg() << std::endl;
     }
 }
 
