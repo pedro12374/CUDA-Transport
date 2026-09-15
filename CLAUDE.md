@@ -13,10 +13,8 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
   9.1T, 18% used). Recursive `find` over `/` or large subtrees is slow — scope
   searches narrowly (`/usr/local`, `/opt`, specific dirs) rather than scanning from `/`.
 - GPU: **1x NVIDIA A30**, 24GB, driver 470.256.02, CUDA driver version 11.4.
-  Compute capability **8.0** → CUDA arch flag should be `sm_80`, NOT `sm_86`
-  (the Makefile's current default `sm_86` targets consumer Ampere/RTX 30-series,
-  not the A30; it happens to still work since PTX for sm_80 is forward-compatible
-  within Ampere, but sm_80 is the correct/native target).
+  Compute capability **8.0** → Makefile's `CUDA_ARCH` now defaults to `sm_80`
+  (was `sm_86`, which targets consumer Ampere/RTX 30-series, not the A30).
 - **Never launch long GPU runs here** — it's shared and has no scheduler. Use
   tiny grids (e.g. 16x16) and few steps for any test/verification run. If a
   real run is needed, stop and hand the user the exact command to run inside
@@ -31,23 +29,26 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
   `/opt/nvidia/hpc_sdk` (NVIDIA HPC SDK) installed but not on `PATH` and not
   used by this project; ignore it unless asked.
 
-## HDF5 / HighFive
+## HDF5
 
-- **HDF5** is installed via Debian packages (`libhdf5-dev` and friends), the
-  "serial" (non-MPI) variant:
-  - Headers: `/usr/include/hdf5/serial`
-  - Libs: `/usr/lib/x86_64-linux-gnu/hdf5/serial/` (e.g. `libhdf5.so`) and also
-    `/usr/lib/x86_64-linux-gnu/libhdf5_serial.so`.
-  - This is **not** at the Makefile's default `HDF5_ROOT := /usr/local/hdf5`
-    (that path doesn't exist on this machine).
-- **HighFive is NOT installed anywhere on this server.** Searched
-  `/usr/local`, `/usr/include`, `/opt`, apt package lists, and `$HOME` — no
-  `HighFive/H5File.hpp` found, no matching apt package. This is why `make`
-  currently fails at the very first `#include <highfive/H5File.hpp>`.
-  HighFive is header-only (MIT license); it needs to be vendored or fetched
-  before the build can work. Network access from this host to github.com
-  works (verified with `curl`), so `git clone` is an option, but **ask the
-  user first** before fetching/installing anything.
+- Uses the **HDF5 C++ API directly** (`H5Cpp.h`), not HighFive — HighFive
+  isn't installed anywhere on this server (checked `/usr/local`,
+  `/usr/include`, `/opt`, apt package lists, `$HOME`) and the user decided to
+  drop the dependency rather than vendor/install it.
+- HDF5 comes from Debian packages (`libhdf5-dev` and friends), the "serial"
+  (non-MPI) variant:
+  - Headers: `/usr/include/hdf5/serial` (includes `H5Cpp.h`)
+  - Libs: `/usr/lib/x86_64-linux-gnu/hdf5/serial/` — `libhdf5.so` and
+    `libhdf5_cpp.so`, linked as `-lhdf5 -lhdf5_cpp`.
+  - The Makefile's `HDF5_INC`/`HDF5_LIB` variables default to these paths and
+    are overridable (`?=`) for other machines.
+- `save_to_h5`/`save_displacement_components` in `cuda_dynamics.h` were
+  rewritten against `H5::H5File`/`H5::DataSet`/`H5::DataSpace`, preserving
+  the "open existing file and append a dataset, or create fresh" behavior and
+  the same dataset names/shapes. Verified with a throwaway 16x16-grid,
+  100-step smoke run read back through `h5py` — dataset names, shapes
+  (`(16,16)`, `(16,16,2)`, `(100,)`), and value ranges all matched
+  expectations (Phase 1, 2026-09-15).
 
 ## Repo structure (as of Phase 0 inspection)
 
@@ -92,11 +93,20 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
   (duplicated file).
 - `plots/` — checked-in PDF outputs (not code).
 
-## Build status at Phase 0
+## Build status
 
-`make` (default target `all` → `horton_msd horton_escape`) fails immediately:
-`fatal error: highfive/H5File.hpp: No such file or directory`, because
-`HDF5_ROOT`/`HIGHFIVE_ROOT` in the Makefile point at paths that don't exist on
-this server. Root cause is two-fold: (1) Makefile paths need to be
-overridable and pointed at the real HDF5 location, and (2) HighFive itself is
-missing and needs to be installed/vendored — see above.
+As of Phase 1, `make` (default target `all` → `horton_msd horton_escape`)
+builds both drivers cleanly with zero warnings under the default flags. See
+git log on the `cleanup` branch for what changed (HighFive → HDF5 C++ API,
+Makefile paths/deps/clean target, driver include/buffer/message fixes).
+
+Two things are still open, both flagged to the user, not yet decided:
+- `main.cu` references `ThreeWaveSystem`/`ThreeWaveSystemParams`, which no
+  longer exist (renamed to `HortonSystem` at some point). It currently has
+  no Makefile target. Needs a decision: fix as a `HortonSystem`
+  stroboscopic-map driver, or delete.
+- `cuda_dynamics_lib/src/*.cu` (`escape_solver.cu`, `lyapunov_solver.cu`,
+  `msd_solver.cu`) are confirmed dead code (byte-identical to logic now in
+  `solvers/*.cuh`, never compiled by any Makefile target). Needs the user's
+  go-ahead to delete (not a `.bkp` file, so per the ground rules it needs
+  explicit permission first).
