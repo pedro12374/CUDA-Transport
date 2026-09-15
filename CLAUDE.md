@@ -100,13 +100,7 @@ builds both drivers cleanly with zero warnings under the default flags. See
 git log on the `cleanup` branch for what changed (HighFive → HDF5 C++ API,
 Makefile paths/deps/clean target, driver include/buffer/message fixes).
 
-Two things are still open, both flagged to the user, not yet decided:
-- `main.cu` references `ThreeWaveSystem`/`ThreeWaveSystemParams`, which no
-  longer exist (renamed to `HortonSystem` at some point). It currently has
-  no Makefile target. Needs a decision: fix as a `HortonSystem`
-  stroboscopic-map driver, or delete.
-- `cuda_dynamics_lib/src/*.cu` (`escape_solver.cu`, `lyapunov_solver.cu`,
-  `msd_solver.cu`) are confirmed dead code (byte-identical to logic now in
-  `solvers/*.cuh`, never compiled by any Makefile target). Needs the user's
-  go-ahead to delete (not a `.bkp` file, so per the ground rules it needs
-  explicit permission first).
+Two things flagged to the user during Phase 1 are now resolved:
+`main.cu` (stale `ThreeWaveSystem` references) and the dead
+`cuda_dynamics_lib/src/*.cu` duplicates were both deleted with the user's
+explicit go-ahead.
