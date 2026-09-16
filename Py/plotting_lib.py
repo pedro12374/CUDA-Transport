@@ -128,6 +128,21 @@ def _add_colorbar(fig, im, ax_target, cbar_label, **kwargs):
     else:
         fig.colorbar(im, ax=ax_target, label=cbar_label, **kwargs)
 
+
+def _read_msd_sample_times(f, data):
+    """
+    Reads the companion 'MSD_sample_times' dataset an ODE system's
+    calculation=msd run saves (see runner.cuh's run_ode_generic) -- but a
+    discrete-map system's calculation=msd run (run_map_generic) writes a
+    dense, one-sample-per-iteration MSD with no such dataset (see
+    ode_msd.cuh/map_msd.cuh's docs for why the two calculation types differ).
+    Falls back to treating each sample as one iteration (np.arange) in that
+    case, instead of a bare KeyError.
+    """
+    if "MSD_sample_times" in f:
+        return f["MSD_sample_times"][:]
+    return np.arange(len(data))
+
 # ==============================================================================
 # == PUBLIC MASTER FUNCTION
 # ==============================================================================
@@ -159,12 +174,14 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
     for i, p_val in enumerate(params_list):
         if i >= len(axs): break
         ax = axs[i]
-        dset_name = f"{dset_prefix}_{p_val:.2f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.6f}"
-        
+        # .4f matches the C++ generic runner's sweep-suffix precision --
+        # see enumerate_sweeps() in cuda_dynamics_lib/include/config.h
+        dset_name = f"{dset_prefix}_{p_val:.4f}"
+
         try:
             with h5py.File(h5_file, 'r') as f:
                 data = f[dset_name][:]
-                msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
+                msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
 
             title = f"{dset_prefix.split('_')[-1]} = {p_val}"
             
@@ -230,13 +247,19 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
         for j, c_val in enumerate(col_params):
             ax = axs[i, j]
             
-            # Construct the dataset name based on the C++ format
-            dset_name = f"{dset_prefix}_{col_prefix}_{c_val:.2f}_{row_prefix}_{r_val:.2f}"
-            
+            # Construct the dataset name based on the C++ format (.4f matches
+            # enumerate_sweeps()'s sweep-suffix precision in config.h)
+            dset_name = f"{dset_prefix}_{col_prefix}_{c_val:.4f}_{row_prefix}_{r_val:.4f}"
+
+            # title was previously referenced below (as `title` in 6 branches,
+            # `plot_title` in the 'basin' branch) without ever being defined
+            # anywhere in this function -- every plot_type raised NameError.
+            title = f"{col_prefix}={c_val}, {row_prefix}={r_val}"
+
             try:
                 with h5py.File(h5_file, 'r') as f:
                     data = f[dset_name][:]
-                    msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
+                    msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
 
                 # Call the appropriate internal plotting function
                 if plot_type == 'escape':
@@ -253,7 +276,7 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
                     im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
                 elif plot_type == 'basin':
              # Pass the new config to the internal function
-                    im, cbar_label = _plot_escape_basin(ax, data, plot_title, bounds, basin_cmap_config)
+                    im, cbar_label = _plot_escape_basin(ax, data, title, bounds, basin_cmap_config)
                 # Add other plot types here if needed
                 else:
                     print(f"Error: Unknown plot type '{plot_type}'.")
@@ -299,7 +322,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     try:
         with h5py.File(h5_file, 'r') as f:
             data = f[dset_name][:]
-            msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
+            msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
 
         plot_title = title if title else dset_name
         
