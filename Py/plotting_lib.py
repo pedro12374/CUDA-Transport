@@ -111,6 +111,23 @@ def _plot_total_displacement(ax, data, title, bounds):
     ax.set_title(title)
     return im, r"Total Displacement Magnitude $\sqrt{\Delta x^2 + \Delta y^2}$"
 
+def _add_colorbar(fig, im, ax_target, cbar_label, **kwargs):
+    """
+    Adds a colorbar for `im`, handling both cbar_label shapes the _plot_*
+    helpers return: a plain string (most plot types), or a
+    {"label":..., "ticks":...} dict (_plot_escape_basin) for a
+    discrete/ticked colorbar. Without this, the dict was previously passed
+    straight through as `label=`, so a basin plot's colorbar showed the
+    dict's repr as its label instead of "Escape Basin" with the [-1,0,1] ticks.
+    """
+    if isinstance(cbar_label, dict):
+        cbar = fig.colorbar(im, ax=ax_target, label=cbar_label.get("label"), **kwargs)
+        ticks = cbar_label.get("ticks")
+        if ticks is not None:
+            cbar.set_ticks(ticks)
+    else:
+        fig.colorbar(im, ax=ax_target, label=cbar_label, **kwargs)
+
 # ==============================================================================
 # == PUBLIC MASTER FUNCTION
 # ==============================================================================
@@ -184,7 +201,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
 
     # --- Final Touches ---
     if im is not None:
-        fig.colorbar(im, ax=axs.tolist(), location='right', shrink=0.6, label=cbar_label)
+        _add_colorbar(fig, im, axs.tolist(), cbar_label, location='right', shrink=0.6)
 
     plt.savefig(output_pdf, format='pdf', bbox_inches='tight')
     print(f"✅ Plot successfully saved to: {output_pdf}")
@@ -255,7 +272,7 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
 
     # --- Final Touches ---
     if im is not None:
-        fig.colorbar(im, ax=axs, location='right', aspect=40, shrink=0.8, label=cbar_label)
+        _add_colorbar(fig, im, axs, cbar_label, location='right', aspect=40, shrink=0.8)
 
     fig.supxlabel('X')
     fig.supylabel('Y')
@@ -317,7 +334,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     ax.set_xlabel('X')
 
     if im is not None:
-        fig.colorbar(im, ax=ax, location='right', shrink=0.8, label=cbar_label)
+        _add_colorbar(fig, im, ax, cbar_label, location='right', shrink=0.8)
 
     plt.savefig(output_pdf, format='pdf', bbox_inches='tight')
     print(f"✅ Plot successfully saved to: {output_pdf}")
@@ -331,8 +348,10 @@ def generate_individual_plots(h5_file, output_dir, plot_type, dset_prefix, param
     
     for p_val in params_list:
         # 1. Construct the specific dataset name for this parameter
-        dset_name = f"{dset_prefix}_{p_val:.2f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.6f}"
-        
+        # (.4f matches the C++ generic runner's sweep-suffix precision --
+        # see enumerate_sweeps() in cuda_dynamics_lib/include/config.h)
+        dset_name = f"{dset_prefix}_{p_val:.4f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.4f}"
+
         # 2. Create a unique, descriptive output filename for this plot
         output_pdf = f"{output_dir}/{plot_type}_{dset_name}.pdf"
         
