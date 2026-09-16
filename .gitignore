@@ -42,6 +42,7 @@
 /tests/*.o
 /tests/bin/
 /build/
+/docs/
 
 # debug information files
 *.dwo
