@@ -67,9 +67,14 @@ def _plot_stroboscopic(ax, data, title, bounds):
     ax.set_ylim(bounds[2], bounds[3]) # Use bounds for y-axis
     ax.set_aspect('equal', adjustable='box')
     return None, None
-def _plot_msd(ax, data, title, bounds=None): # bounds is unused but keeps signature consistent
-    """Internal function to plot MSD data on a log-log scale."""
-    t = np.arange(len(data)) * 0.01 # Assuming DT=0.01 from main.cu
+def _plot_msd(ax, data, title, t, bounds=None): # bounds is unused but keeps signature consistent
+    """Internal function to plot MSD data on a log-log scale.
+
+    `t` is the physical time of each sample (read from the 'MSD_sample_times'
+    dataset the C++ driver saves alongside each MSD_* dataset) -- the samples
+    are logarithmically spaced, not one-per-timestep, so this can't be
+    reconstructed from len(data) and a fixed dt.
+    """
     # Power-law model for fitting: MSD = D * t^alpha
     def power_law(t, D, alpha):
         return D * (t**alpha)
@@ -146,6 +151,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
         try:
             with h5py.File(h5_file, 'r') as f:
                 data = f[dset_name][:]
+                msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
 
             title = f"{dset_prefix.split('_')[-1]} = {p_val}"
             
@@ -161,7 +167,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
             elif plot_type == 'total_displacement': 
                 im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
             elif plot_type == 'msd':
-                im, cbar_label = _plot_msd(ax, data, title, bounds)
+                im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
             elif plot_type == 'basin':
                 # Pass the new config to the internal function
                 im, cbar_label = _plot_escape_basin(ax, data, title, bounds, basin_cmap_config)
@@ -217,6 +223,7 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
             try:
                 with h5py.File(h5_file, 'r') as f:
                     data = f[dset_name][:]
+                    msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
 
                 # Call the appropriate internal plotting function
                 if plot_type == 'escape':
@@ -227,10 +234,10 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
                     im, cbar_label = _plot_stroboscopic(ax, data, title, bounds)
                 elif plot_type == 'displacement':
                     im, cbar_label = _plot_displacement(ax, data, title, bounds)
-                elif plot_type == 'total_displacement': 
+                elif plot_type == 'total_displacement':
                     im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
                 elif plot_type == 'msd':
-                    im, cbar_label = _plot_msd(ax, data, title, bounds)
+                    im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
                 elif plot_type == 'basin':
              # Pass the new config to the internal function
                     im, cbar_label = _plot_escape_basin(ax, data, plot_title, bounds, basin_cmap_config)
@@ -279,6 +286,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     try:
         with h5py.File(h5_file, 'r') as f:
             data = f[dset_name][:]
+            msd_t = f['MSD_sample_times'][:] if plot_type == 'msd' else None
 
         plot_title = title if title else dset_name
         
@@ -294,7 +302,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
         elif plot_type == 'total_displacement': 
             im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
         elif plot_type == 'msd':
-            im, cbar_label = _plot_msd(ax, data, title, bounds)
+            im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
         elif plot_type == 'basin':
              # Pass the new config to the internal function
             im, cbar_label = _plot_escape_basin(ax, data, plot_title, bounds, basin_cmap_config)
