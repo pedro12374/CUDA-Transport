@@ -132,14 +132,19 @@ struct HortonSystem {
         double cos_ky1_y = cos(params.ky1 * y);
         double sin_ky1_y = sin(params.ky1 * y);
         
-        double cos_kx2_x_phase = cos(params.kx2 * x + M_PI);
-        double sin_kx2_x_phase = sin(params.kx2 * x + M_PI);
+        // Phase offset must match operator()'s sin(kx2*x + 0.5)/cos(kx2*x + 0.5)
+        // (and the wave-3 equivalent) exactly -- this used to be M_PI, which
+        // silently differentiated a different function (cos(theta+pi) =
+        // -cos(theta) != cos(theta+0.5) in general), giving a wrong Jacobian
+        // -- and hence a wrong Lyapunov exponent -- whenever A2 or A3 != 0.
+        double cos_kx2_x_phase = cos(params.kx2 * x + 0.5);
+        double sin_kx2_x_phase = sin(params.kx2 * x + 0.5);
         double arg2_y = params.ky2 * (y - params.v2 * t);
         double cos_arg2_y = cos(arg2_y);
         double sin_arg2_y = sin(arg2_y);
 
-        double cos_kx3_x_phase = cos(params.kx3 * x + M_PI);
-        double sin_kx3_x_phase = sin(params.kx3 * x + M_PI);
+        double cos_kx3_x_phase = cos(params.kx3 * x + 0.5);
+        double sin_kx3_x_phase = sin(params.kx3 * x + 0.5);
         double arg3_y = params.ky3 * (y - params.v3 * t);
         double cos_arg3_y = cos(arg3_y);
         double sin_arg3_y = sin(arg3_y);
