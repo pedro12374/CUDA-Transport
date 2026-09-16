@@ -1,4 +1,21 @@
-#pragma once // File: cuda_dynamics_lib/include/cuda_dynamics.h
+#pragma once
+/**
+ * @file cuda_dynamics.h
+ * @brief Core library header: initial-condition grid setup (GridSetup),
+ * HDF5 output (save_to_h5(), save_displacement_components()), the shared
+ * RK4 integrator (rk4_step_t()) every ODE solver builds on, and small
+ * device-side vector/matrix helpers. Pulls in every solver header
+ * (solvers/*.cuh) at the bottom, so including this one header is enough to
+ * use the whole library.
+ *
+ * Most users won't need to call anything here directly -- see runner.cuh
+ * for the config-driven entry points (run_ode_generic()/run_map_generic())
+ * that most drivers use instead. This header matters directly to: (a)
+ * anyone writing a new dynamical system (GridSetup, and the
+ * SystemTraits/MapTraits forward declarations your system specializes --
+ * see maps/horton.h), and (b) anyone calling a solver's calculate_*()
+ * function by hand instead of through the generic runner.
+ */
 
 #include <H5Cpp.h>
 #include <cuda_runtime.h>
@@ -19,15 +36,39 @@ struct SystemTraits;
     } \
 }
 
-// The GridSetup helper is now part of the library's public interface.
+/**
+ * @brief Builds a regular, DIMS-dimensional tensor-product grid of initial
+ * conditions -- the standard way this library's drivers populate the
+ * `h_initial_conditions` array every solver's `calculate_*()` function
+ * takes. Constructed once by `run_ode_generic()`/`run_map_generic()`
+ * (runner.cuh) from a config file's `grid_dims`/`grid_min`/`grid_max`.
+ *
+ * A resolution-1 dimension (`grid_res[j] == 1`) fixes that coordinate at
+ * `min_bounds[j]` rather than being an error -- the standard way to hold
+ * some state components fixed (e.g. momenta) while scanning others (e.g.
+ * position), such as Henon-Heiles' "release from rest" escape-basin scan
+ * (see maps/henon_heiles.h and configs/henon_heiles_escape.cfg).
+ */
 struct GridSetup {
-    // --- Member Variables ---
+    /** State dimensionality (must match every array this grid is passed to). */
     const int DIMS;
+    /** Number of grid points along each dimension, length DIMS. */
     std::vector<int> grid_res;
+    /** Total particle count: the product of grid_res. */
     long long num_particles;
+    /** Flattened initial conditions, length `num_particles * DIMS`, layout `(particle, dimension)`. */
     std::vector<double> h_initial_conditions;
 
-    // --- Constructor: Does all the setup work ---
+    /**
+     * @param dimensions State dimensionality.
+     * @param resolution Grid points per dimension, length `dimensions`.
+     * @param min_bounds Lower bound per dimension, length `dimensions`.
+     * @param max_bounds Upper bound per dimension, length `dimensions`
+     * (ignored for any dimension with `resolution[j] == 1`; only
+     * `min_bounds[j]` is used for that dimension's fixed value).
+     * @throws std::runtime_error if `resolution`/`min_bounds`/`max_bounds`
+     * don't all have length `dimensions`.
+     */
     GridSetup(int dimensions, const std::vector<int>& resolution,
               const std::vector<double>& min_bounds, const std::vector<double>& max_bounds)
         : DIMS(dimensions) {
@@ -85,6 +126,19 @@ inline H5::H5File open_or_create_h5(const std::string& filename) {
     return H5::H5File(filename, H5F_ACC_TRUNC);
 }
 
+/**
+ * @brief Writes `data` to a new dataset in an HDF5 file, creating the file
+ * if it doesn't exist, or adding the dataset to it (without disturbing
+ * existing datasets) if it does -- so a driver can call this once per
+ * output array across a parameter sweep and accumulate everything into one
+ * file.
+ * @param filename HDF5 file path. Parent directory must already exist.
+ * @param dset_name Name for the new dataset. Fails if a dataset with this
+ * name already exists in `filename`.
+ * @param dims Dataset shape.
+ * @param data Row-major data, exactly `dims[0]*dims[1]*...` doubles.
+ * @throws std::runtime_error on any HDF5 error (file/dataset creation, write).
+ */
 inline void save_to_h5(const std::string& filename, const std::string& dset_name, const std::vector<size_t>& dims, const double* data) {
     H5::Exception::dontPrint();
     try {
@@ -100,6 +154,21 @@ inline void save_to_h5(const std::string& filename, const std::string& dset_name
     }
 }
 
+/**
+ * @brief Like save_to_h5(), but for a per-component array shaped like the
+ * grid itself (e.g. MSD's per-particle displacement, `(x,y)` per grid
+ * point): the dataset gets shape `grid.grid_res + [grid.DIMS]`, e.g.
+ * `{512, 512, 2}` for a 2D, 512x512 grid, instead of needing the caller to
+ * build that shape by hand.
+ * @param filename HDF5 file path. Parent directory must already exist.
+ * @param dset_name Name for the new dataset.
+ * @param grid The grid `data` was computed on (supplies the shape).
+ * @param data Row-major data, `num_particles * grid.DIMS` doubles.
+ *
+ * @note Unlike save_to_h5(), HDF5 errors here are caught and logged to
+ * stderr rather than thrown -- a pre-existing inconsistency between the
+ * two functions, not deliberate API design; callers shouldn't rely on it.
+ */
 inline void save_displacement_components(const std::string& filename, const std::string& dset_name,
                                   const GridSetup& grid, const double* data) {
     try {
@@ -128,7 +197,11 @@ inline void save_displacement_components(const std::string& filename, const std:
 }
 
 
-// Performs matrix-vector multiplication: v_out = J * v_in
+/**
+ * @brief Matrix-vector product `v_out = J * v_in`, `J` row-major
+ * `DIMS x DIMS`. Used by the Lyapunov exponent solvers to evolve a tangent
+ * vector through a system's jacobian().
+ */
 template <int DIMS>
 __device__ inline void matrix_vector_mult(const double J[DIMS*DIMS], const double v_in[DIMS], double v_out[DIMS]) {
     for (int i = 0; i < DIMS; ++i) {
@@ -139,7 +212,7 @@ __device__ inline void matrix_vector_mult(const double J[DIMS*DIMS], const doubl
     }
 }
 
-// Calculates the Euclidean norm (magnitude) of a vector
+/** @brief Euclidean norm of a DIMS-vector. */
 template <int DIMS>
 __device__ inline double vector_norm(const double v[DIMS]) {
     double norm_sq = 0.0;
@@ -149,7 +222,7 @@ __device__ inline double vector_norm(const double v[DIMS]) {
     return sqrt(norm_sq);
 }
 
-// Normalizes a vector in-place
+/** @brief Normalizes `v` in place to unit length; a no-op if `norm <= 1e-12` (avoids dividing by ~0). */
 template <int DIMS>
 __device__ inline void normalize_vector(double v[DIMS], double norm) {
     if (norm > 1e-12) { // Avoid division by zero
@@ -159,7 +232,25 @@ __device__ inline void normalize_vector(double v[DIMS], double norm) {
     }
 }
 
-
+/**
+ * @brief One classical (non-adaptive, 4th-order) Runge-Kutta step,
+ * advancing `state` in place from time `t` to `t + dt`. The single
+ * integrator every ODE solver in this library (ode_escape.cuh,
+ * ode_msd.cuh, ode_lyapunov.cuh, ode_strobo.cuh) is built on -- a new
+ * solver for continuous-time systems should use this rather than
+ * hand-rolling its own stepper.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type providing `operator()<DIMS>(state,
+ * dstate_dt, params, t)` (see maps/horton.h's file-level docs for the full
+ * interface a system implements).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param state [in,out] State to advance in place.
+ * @param t Time at the start of the step.
+ * @param dt Step size.
+ * @param system The system functor (stateless; typically default-constructed by the caller).
+ * @param params Physical parameters passed through to every `operator()` call.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 __device__ inline void rk4_step_t(
     double state[DIMS],
@@ -203,7 +294,31 @@ struct MapTraits;
 
 
 
-// This function is implemented inline here in the header.
+/**
+ * @brief Records every iterate of `map_functor` for `num_iterations`, for
+ * every particle -- a full phase-space trajectory, not just an escape
+ * time/basin. Driven by `calculation = phasespace` in a map system's config
+ * (see run_map_generic() in runner.cuh).
+ *
+ * @note **CPU-only.** Unlike every other `calculate_*()` function in this
+ * library, there's no GPU kernel for this one -- it's a plain host loop.
+ * Fine for the grid sizes/iteration counts a phase-space plot typically
+ * needs; slow for anything approaching the particle counts used for escape
+ * scans.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam MapType A map type providing `operator()<DIMS>(state_map,
+ * state_unwrapped, params)` (see maps/standard_map.h for the full map
+ * interface).
+ * @tparam ParamsType That map's parameter struct type.
+ * @param map_functor The map functor (stateless; typically default-constructed by the caller).
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_iterations Iterations to record per particle.
+ * @param h_phase_space_out [out] Host array, `num_particles * num_iterations
+ * * DIMS` doubles, layout `(particle, iteration, dimension)`.
+ */
 template <int DIMS, typename MapType, typename ParamsType>
 inline void calculate_phase_space(
     const MapType& map_functor,

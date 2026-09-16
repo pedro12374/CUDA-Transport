@@ -1,25 +1,32 @@
-#pragma once // File: cuda_dynamics_lib/include/runner.cuh
-//
-// Generic, config-file-driven entry points. A new dynamical system needs:
-//   1. A system header (e.g. maps/horton.h) defining the functor + Params
-//      struct + SystemTraits (ODE) or MapTraits (map) + a load_params_for<>
-//      specialization (see config.h) -- the full "system definition".
-//   2. A trivial per-system entry point .cu, e.g.:
-//
-//        #include "cuda_dynamics_lib/include/cuda_dynamics.h"
-//        #include "cuda_dynamics_lib/include/runner.cuh"
-//        #include "maps/horton.h"
-//        int main(int argc, char** argv) {
-//            return run_ode_generic<2, HortonSystem, HortonSystemParams>(argc, argv);
-//        }
-//
-//   3. A config file (see configs/*.cfg for examples) picking what to
-//      calculate, the grid, dt/final_time (ODE) or iterations (map), and
-//      the system's own physical parameters -- optionally as comma-
-//      separated sweep lists (see config.h's enumerate_sweeps).
-//
-// No solver or library code needs to change to add a system or run a
-// different calculation on it.
+#pragma once
+/**
+ * @file runner.cuh
+ * @brief Generic, config-file-driven entry points -- run_ode_generic() and
+ * run_map_generic() -- that most drivers call from `main()` instead of
+ * calling a solver's `calculate_*()` function directly. A new dynamical
+ * system needs:
+ *   1. A system header (e.g. maps/horton.h) defining the functor + Params
+ *      struct + `SystemTraits` (ODE) or `MapTraits` (map) + a
+ *      `load_params_for<>` specialization (see config.h) -- the full
+ *      "system definition" (see horton.h's file-level docs for the
+ *      complete contract, and TUTORIAL.md for a from-scratch walkthrough).
+ *   2. A trivial per-system entry point `.cu`, e.g.:
+ *      @code
+ *        #include "cuda_dynamics_lib/include/cuda_dynamics.h"
+ *        #include "cuda_dynamics_lib/include/runner.cuh"
+ *        #include "maps/horton.h"
+ *        int main(int argc, char** argv) {
+ *            return run_ode_generic<2, HortonSystem, HortonSystemParams>(argc, argv);
+ *        }
+ *      @endcode
+ *   3. A config file (see configs/*.cfg for examples) picking what to
+ *      calculate, the grid, `dt`/`final_time` (ODE) or `iterations` (map),
+ *      and the system's own physical parameters -- optionally as comma-
+ *      separated sweep lists (see config.h's enumerate_sweeps()).
+ *
+ * No solver or library code needs to change to add a system or run a
+ * different calculation on it.
+ */
 
 #include "cuda_dynamics.h"
 #include "config.h"
@@ -60,7 +67,49 @@ inline std::vector<double> require_dims_list_d(const Config& cfg, const std::str
 // =============================================================================
 // == Generic runner for continuous-time (RK4-integrated) systems
 // =============================================================================
-// calculation = escape | msd | lyapunov | stroboscopic
+
+/**
+ * @brief Config-driven entry point for a continuous-time (RK4-integrated)
+ * system -- reads a config file, builds the initial-condition grid, runs
+ * every combination of a parameter sweep, and writes HDF5 output. Intended
+ * to be called directly from `main()`; see this header's file-level docs
+ * for the ~4-line pattern every `run_<system>.cu` follows.
+ *
+ * Required config keys (all sweepable except `grid_dims`/`grid_min`/`grid_max`,
+ * `calculation`, and `output_file` -- see config.h's enumerate_sweeps()):
+ *  - `calculation`: one of `escape`, `msd`, `lyapunov`, `stroboscopic`.
+ *  - `output_file`: HDF5 output path; parent directories are created, and
+ *    an existing file at this path is deleted before the first write.
+ *  - `dt`: integration step size.
+ *  - `grid_dims`, `grid_min`, `grid_max`: DIMS entries each (see GridSetup).
+ *  - `final_time` (escape/msd/lyapunov): total integration time; steps run
+ *    is `(int)(final_time/dt)`.
+ *  - `steps_per_batch` (escape/msd, optional, default 20000): see
+ *    calculate_ode_escape()/calculate_ode_msd_and_displacement() in
+ *    ode_escape.cuh/ode_msd.cuh for why long runs are batched.
+ *  - `msd_samples` (msd, optional, default 300): see
+ *    generate_log_spaced_steps() in ode_msd.cuh.
+ *  - `stroboscopic_tau` (stroboscopic, required), `stroboscopic_points`
+ *    (stroboscopic, optional, default 500).
+ *  - Any key the system's own `load_params_for<ParamsType>` reads (see
+ *    that system's header, e.g. maps/horton.h).
+ *
+ * HDF5 datasets written, one call per sweep combination, each named with a
+ * `_key1_value1_key2_value2...` suffix if anything was swept (empty if
+ * not): `EscapeTime`/`EscapeBasin` (escape); `MSD`/`Displacement`/
+ * `TotalDisplacement` per combination plus a single shared
+ * `MSD_sample_times` (msd); `Lyapunov` (lyapunov); `Strobo` (stroboscopic).
+ *
+ * @tparam DIMS State dimensionality (fixed at compile time -- this is why
+ * each system needs its own tiny entry-point `.cu` rather than being
+ * runtime-selectable).
+ * @tparam SystemType The system functor type, e.g. `HortonSystem`.
+ * @tparam ParamsType That system's parameter struct type.
+ * @param argc,argv Command-line arguments as passed to `main()`; expects
+ * exactly one argument, the config file path.
+ * @return `0` on success; `1` on any error (bad usage, a config problem,
+ * or an unknown `calculation` value), after printing a message to stderr.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline int run_ode_generic(int argc, char** argv) {
     using namespace cudat_runner_detail;
@@ -189,7 +238,36 @@ inline int run_ode_generic(int argc, char** argv) {
 // =============================================================================
 // == Generic runner for discrete maps
 // =============================================================================
-// calculation = escape | msd | lyapunov | phasespace
+
+/**
+ * @brief Config-driven entry point for a discrete map system -- the
+ * `MapType` counterpart to run_ode_generic(). Same overall behavior (see
+ * run_ode_generic()'s docs), with map-shaped config keys:
+ *  - `calculation`: one of `escape`, `msd`, `lyapunov`, `phasespace`.
+ *  - `output_file`, `grid_dims`, `grid_min`, `grid_max`: same as run_ode_generic().
+ *  - `iterations` (all calculation types): number of map iterations to run
+ *    (there's no `dt`/`final_time` for a discrete map).
+ *  - Any key the system's own `load_params_for<ParamsType>` reads (see
+ *    that system's header, e.g. maps/standard_map.h).
+ *
+ * Unlike the ODE runner, `msd` here is **not** log-sampled or batched (one
+ * MSD sample per iteration, one kernel launch) -- fine at the iteration
+ * counts map calculations typically need; see ode_msd.cuh's docs for why
+ * the ODE side needed both. `phasespace` is CPU-only (see
+ * calculate_phase_space() in cuda_dynamics.h) -- slow at large grid/iteration counts.
+ *
+ * HDF5 datasets written (see run_ode_generic() for the sweep-suffix
+ * convention): `EscapeTime`/`EscapeBasin` (escape); `MSD`/`Displacement`/
+ * `TotalDisplacement` (msd, no shared sample-times dataset since sampling
+ * is dense); `Lyapunov` (lyapunov); `PhaseSpace` (phasespace).
+ *
+ * @tparam DIMS State dimensionality (fixed at compile time; see run_ode_generic()).
+ * @tparam MapType The map functor type, e.g. `StandardMap`.
+ * @tparam ParamsType That map's parameter struct type.
+ * @param argc,argv Command-line arguments as passed to `main()`; expects
+ * exactly one argument, the config file path.
+ * @return `0` on success; `1` on any error, after printing a message to stderr.
+ */
 template <int DIMS, typename MapType, typename ParamsType>
 inline int run_map_generic(int argc, char** argv) {
     using namespace cudat_runner_detail;
