@@ -28,8 +28,9 @@ Documentation is the most critical step to make the library usable by others.
 
 Improve how simulations are configured and executed.
 
-- [ ] **Implement Configuration Files:** Instead of hardcoding simulation parameters (A2/A3 values, grid size, number of iterations) in the `main` files, move them to an external configuration file (e.g., `config.json` or `params.txt`).
-    - [ ] Modify the `main` executables to read these configuration files at startup.
+- [x] **Implement Configuration Files:** Instead of hardcoding simulation parameters (A2/A3 values, grid size, number of iterations) in the `main` files, move them to an external configuration file (e.g., `config.json` or `params.txt`).
+    - [x] Modify the `main` executables to read these configuration files at startup.
+    - Done via a generic, config-driven runner rather than per-driver parsing: see `cuda_dynamics_lib/include/config.h`/`runner.cuh` and `configs/*.cfg`. A dependency-free `key = value` format was used instead of JSON (no JSON dev headers installed on the dev server, no passwordless sudo to add one).
 - [ ] **Migrate the Build System to CMake (Advanced):** To facilitate compilation across different systems, replace the `Makefile` with `CMake`.
     - [ ] `CMake` can automatically find dependencies (HDF5, etc.), which makes compilation much easier for other users.
 
@@ -37,14 +38,15 @@ Improve how simulations are configured and executed.
 
 Ensure that the results are always correct and the code is reliable.
 
-- [ ] **Create a Test Suite:**
-    - [ ] Add a `tests/` directory.
-    - [ ] Write simple tests that verify the solvers produce known results for simple cases (e.g., verify that a stable orbit in the Standard Map for a low K value remains confined).
-    - [ ] This ensures that future code changes do not accidentally break the physics of the calculations.
+- [x] **Create a Test Suite:**
+    - [x] Add a `tests/` directory.
+    - [x] Write simple tests that verify the solvers produce known results for simple cases (e.g., verify that a stable orbit in the Standard Map for a low K value remains confined).
+    - [x] This ensures that future code changes do not accidentally break the physics of the calculations.
+    - Run with `make test`; see `tests/README.md` for what's covered (GPU-vs-CPU reference trajectories, RK4 convergence order, confined regular orbits, conserved quantities, batching regression).
 
 ### Low Priority: Refactoring & Features
 
 Finalize the code structure and add new functionality.
 
-- [ ] **Finalize the "Header-Only" Refactor:** Ensure all solvers (`map_escape`, `map_lyapunov`, etc.) have been moved to their own `.cuh` files and that the old library `.cu` files have been removed.
+- [x] **Finalize the "Header-Only" Refactor:** Ensure all solvers (`map_escape`, `map_lyapunov`, etc.) have been moved to their own `.cuh` files and that the old library `.cu` files have been removed.
 - [ ] **Unify Python Plotting Scripts:** Consolidate all old `Plot_Thesis_*.py` scripts into the new structure with `plotting_lib.py` and `run_plots.py` to avoid code duplication.

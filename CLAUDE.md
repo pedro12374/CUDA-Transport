@@ -75,9 +75,18 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
 - `maps/standard_map.h` — `StandardMap`/`StandardMapParams` discrete map +
   `MapTraits<StandardMap>` + `load_params_for<StandardMapParams>`. The
   reference example of a complete discrete-map system definition.
-- `run_horton.cu`, `run_standard_map.cu` — the trivial (~4 line) per-system
-  entry points; see "Generic library architecture" below.
-- `configs/*.cfg` — example/working config files for both systems.
+- `maps/henon_heiles.h` — `HenonHeilesSystem`/`HenonHeilesParams` (the
+  classic Hamiltonian escape system), `DIMS=4` (x,y,px,py) -- the third
+  system, added in Phase 3 partly to prove the generic runner is actually
+  generic over DIMS, not just over which 2D system is plugged in. Also
+  exposes `henon_heiles_energy` (conserved quantity, used by
+  `tests/test_conservation.cu`).
+- `run_horton.cu`, `run_standard_map.cu`, `run_henon_heiles.cu` — the
+  trivial (~4 line) per-system entry points; see "Generic library
+  architecture" below.
+- `configs/*.cfg` — example/working config files for all three systems.
+- `tests/` — the test suite (`make test`); see `tests/README.md` and the
+  "Phase 3" section below.
 - `Py/` — current plotting stack: `plotting_lib.py` (all the `_plot_*`
   helpers + mosaic/matrix/individual plot generators), `run_plots.py` (driver
   script, reads from `../dat/*.h5`), `parana_theme.py` (color theme),
@@ -90,10 +99,12 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
 
 ## Build status
 
-`make` (default target `all` → `run_horton run_standard_map`) builds both
-generic drivers cleanly with zero warnings under the default flags. See git
-log on the `cleanup` branch for full history (HighFive → HDF5 C++ API,
-Makefile fixes, Phase 2 correctness fixes, the generic-runner rewrite).
+`make` (default target `all` → `run_horton run_standard_map run_henon_heiles`)
+builds all three generic drivers cleanly with zero warnings under the
+default flags. `make test` builds and runs the test suite (`tests/`, ~2s
+once built). See git log on the `cleanup` branch for full history
+(HighFive → HDF5 C++ API, Makefile fixes, Phase 2 correctness fixes, the
+generic-runner rewrite, Phase 3's test suite + Henon-Heiles).
 
 ## Phase 2 (correctness review) — what changed
 
@@ -176,6 +187,71 @@ values to the old `main_horton_msd.cu` driver's Phase 2 smoke-test output --
 confirms the rewrite preserved behavior exactly, not just "runs without
 crashing." `run_standard_map` + `configs/standard_map_escape.cfg` exercises
 the discrete-map path end-to-end as a second worked example.
+
+## Phase 3: test suite + Henon-Heiles
+
+Per the user's request (2026-09-16): built the `tests/` suite (`make test`)
+covering the existing systems (Horton, Standard Map) and added a third
+system, Henon-Heiles (`maps/henon_heiles.h`) — a paradigmatic Hamiltonian
+escape system, `H = 1/2(px^2+py^2) + 1/2(x^2+y^2) + lambda*(x^2*y - y^3/3)`
+(`lambda=1` is the textbook form), `DIMS=4` (x,y,px,py). Deliberately chosen
+as the third system because it's *not* 2D like Horton/Standard Map — a real
+test that the generic runner (`run_ode_generic<DIMS,...>`) is actually
+generic over DIMS, not just over which 2D system is plugged in. Escape
+criterion: `r > 10`, basin 1/2/3 records which of the three saddle-point
+channels (at 90°/210°/330°, matching the classic literature result) the
+particle left through. `configs/henon_heiles_escape.cfg` reproduces the
+standard "released from rest" (px0=py0=0) fractal escape-basin scan.
+
+Along the way, fixed a real latent bug in `GridSetup` needed to make that
+config file work at all: a single-point dimension (`grid_res[j]==1`, used
+to hold px0/py0 fixed while scanning x0/y0) divided by `grid_res[j]-1 == 0`,
+producing NaN. Now a size-1 dimension just takes `min_b[j]`. No effect on
+any existing multi-point dimension.
+
+`tests/` (see `tests/README.md` for the full table) — `make test` runs in
+~2s once built (a cold `nvcc` build of all 5 test binaries takes ~45s, but
+that's compile time, not test time):
+- **GPU vs CPU reference** (`test_gpu_vs_cpu.cu`): Horton and Henon-Heiles
+  via the real stroboscopic solver (tau==dt) vs `tests/common.h`'s
+  independently-written `cpu_rk4_step`; Standard Map's GPU escape kernel vs
+  a host-side map loop. Found and worked around a subtlety, not a bug: at
+  chaotic K (tried K=1.5 first), a few ULP of benign host/device
+  floating-point difference gets exponentially amplified by the positive
+  Lyapunov exponent into a completely different escape time by iteration
+  ~180 — confirmed by direct trajectory inspection (p random-walks past
+  several multiples of pi). Fixed by using sub-chaotic K=0.5 for this
+  specific bit-level check; chaotic-regime behavior is what
+  `test_confinement.cu` exercises instead (aggregate escape/no-escape only,
+  not per-particle timing).
+- **Convergence** (`test_convergence.cu`): RK4 is 4th order, so halving dt
+  should cut the error ~16x; checked via dt/dt/2/dt/4 against each other.
+  Horton needed dt=0.005 (not 0.02) to actually reach the asymptotic ~16
+  ratio, since its effective frequency scale (kx1=6, ky1=3) is higher than
+  Henon-Heiles' O(1) — verified empirically by scanning dt before picking
+  the test's value (same finding shows up in `test_conservation.cu`).
+- **Confinement** (`test_confinement.cu`): sub-critical/regular orbits never
+  escape. For the Standard Map, learned (and documented in the test) that
+  "K below the chaos threshold" is *not* sufficient on its own — only
+  initial conditions well inside a stable island are guaranteed confined;
+  particles starting near the |p|=pi escape boundary can still be caught in
+  a local stochastic layer and drift across it even at low K. Verified
+  empirically which (K, p0-range) combinations are actually safe before
+  picking the test's parameters. Henon-Heiles' version is a rigorous
+  consequence of energy conservation (E < E_c=1/6 bounds the orbit forever,
+  not just empirically observed).
+- **Conservation** (`test_conservation.cu`): validates the Phase-3-planning
+  question from the original roadmap ("check the equations first and tell
+  me if \[the stream-function] test is valid") — confirmed valid by direct
+  differentiation: for Horton's single-wave case (A2=A3=0), the flow is
+  divergence-free and autonomous, and
+  `psi(x,y) = -A1*sin(kx1*x)*cos(ky1*y)` (now in `maps/horton.h` as
+  `horton_single_wave_stream_function`) is exactly conserved. Henon-Heiles'
+  version is the standard total-energy check (`henon_heiles_energy`, also
+  in its header).
+- **Batching regression** (`test_batching.cu`): formalizes the Phase 2
+  batched-vs-unbatched validation (previously only done ad hoc in scratch)
+  into a permanent test, extended to also cover Henon-Heiles.
 
 ## Python environment note
 
