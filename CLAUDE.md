@@ -90,8 +90,14 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
 - `Py/` — current plotting stack: `plotting_lib.py` (all the `_plot_*`
   helpers + mosaic/matrix/individual plot generators), `run_plots.py` (driver
   script, reads from `../dat/*.h5`), `parana_theme.py` (color theme),
-  `Quant.jl` (Julia, basin-entropy calculation via `Attractors.jl`, reads
-  basin H5 datasets written by the C++ code).
+  `basin_metrics.py` (Phase 3.5 quantifiers, see below), `Quant.jl` (Julia,
+  basin-entropy calculation via `Attractors.jl` -- **stale**: reads
+  `../dat/Escape.h5`/`Basin_K_%.6f`, the old `.bkp` driver's output format,
+  deleted in Phase 1; the current Standard Map driver writes
+  `EscapeBasin_K_...` to a different file. Not fixed/touched -- flagged to
+  the user, since basin_metrics.py now covers the same ground (plus more)
+  in Python and it's their call whether to update, keep both, or drop the
+  Julia version).
 - `Presentation/` — manim-slides talk (`press.py`), a quick zoom plot script
   (`plt.py`), and `parana_theme.py` which is byte-identical to `Py/parana_theme.py`
   (duplicated file).
@@ -253,6 +259,52 @@ that's compile time, not test time):
   batched-vs-unbatched validation (previously only done ad hoc in scratch)
   into a permanent test, extended to also cover Henon-Heiles.
 
+## Basin quantifiers (Py/basin_metrics.py)
+
+Per the user's request (2026-09-16): added basin entropy, basin boundary
+entropy, a Wada-property merging test, basin area fractions, an MSD
+diffusion-exponent fit, and a fractal-dimension estimate. User's own design
+call: Python (`Py/basin_metrics.py`, next to `plotting_lib.py`), not new
+CUDA code -- reasoned through with the user that all but one of these are
+pure post-processing on data the GPU code already saved (`EscapeBasin_*`,
+`MSD_*`/`MSD_sample_times`), not new dynamics.
+
+The one exception, fractal dimension, is conceptually the uncertainty
+exponent method (Grebogi et al. 1983: perturb points by eps and re-simulate
+to see if they land in a different basin, fit the "uncertain fraction"
+f(eps) ~ eps^alpha across scales, D = d - alpha) -- user explicitly chose
+this over plain box-counting. Implemented as a **grid-based** variant
+(`uncertainty_exponent_fractal_dimension`): reuses the already-computed
+basin grid's own spacing as the perturbation (compare each point's basin to
+its neighbor at 1, 2, 4, 8, ... pixels away) instead of running new
+simulations at arbitrary sub-pixel offsets. Trade-off documented in the
+docstring: can't probe scales below one grid cell; a true continuum version
+would need the solvers to accept an arbitrary point list instead of only a
+regular grid (`GridSetup`), which they don't yet -- flagged as a possible
+future extension, not built now.
+
+Validated (not just unit-tested) against a real Henon-Heiles basin scan
+(250x250 grid, brief run: final_time=300 instead of the shipped config's
+1000, ~30s) rather than only synthetic data:
+- Area fractions, Sb=0.21, Sbb=0.81 all physically reasonable (Sbb > Sb, as
+  expected -- boundary boxes carry more disorder than the average).
+- **Wada merging test gave a genuinely structured, physically interpretable
+  result**: merging any pair of the three *escape* basins (channels 1,2,3)
+  dropped Sbb to ~0.67-0.69 (evidence they share a complex boundary among
+  themselves), while merging the *confined* basin (0) with any escape basin
+  barely moved it (~0.94) -- not noise, a real signal.
+- Fractal dimension D≈1.56 (uncertainty exponent α≈0.44) -- lands right in
+  the range published for the Henon-Heiles escape boundary, which doesn't
+  happen by chance if the method were broken.
+- `fit_diffusion_exponent` recovers known synthetic (D,alpha) to ~1% on
+  noisy synthetic power-law data.
+
+`plotting_lib.py`'s `_plot_msd` was refactored to call
+`basin_metrics.fit_diffusion_exponent` instead of duplicating the
+`curve_fit` logic inline -- single source of truth, no behavior change
+(verified by running the actual plot function end-to-end, working around
+the LaTeX issue below to isolate the check to just this code path).
+
 ## Python environment note
 
 `Py/plotting_lib.py` currently fails to import in this user's shell:
@@ -261,7 +313,19 @@ apt's `scipy` (1.6.0, from `/usr/lib/python3/dist-packages`) references
 that shadows the system one. This is pre-existing and unrelated to any
 change made here — flagged but not fixed (would mean upgrading `scipy` via
 `pip install --user --upgrade scipy` or similar, which affects the user's
-personal Python environment and wasn't asked for).
+personal Python environment and wasn't asked for). Worked around for
+testing by building an isolated venv in scratch (numpy 2.0.2, scipy 1.13.1,
+h5py 3.14.0, matplotlib) — discarded after use, nothing installed for the
+user.
+
+Second, separate issue found while testing `basin_metrics.py`'s integration
+with `plotting_lib.py`: `parana_theme.py` sets `matplotlib.rcParams['text.
+usetex'] = True`, and this system's LaTeX install is missing `type1cm.sty`
+(`latex` errors on `\usepackage{type1ec}`), so any plot with LaTeX-rendered
+text crashes at `savefig`. Also pre-existing, also not fixed (would mean
+installing a `texlive` package, e.g. `texlive-latex-extra`, needing `sudo`).
+Worked around for testing by setting `usetex=False`; not something to
+silently disable in the actual library code without asking.
 
 ## Project intent (see also memory: `project-generic-tool-goal`)
 
