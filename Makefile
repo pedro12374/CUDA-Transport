@@ -78,12 +78,19 @@ run_henon_heiles: run_henon_heiles.cu $(HEADERS)
 	@echo "==> Building Henon-Heiles generic runner"
 	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
+# TUTORIAL.md's worked example (a driven, damped pendulum). Not part of
+# `all` -- it's a teaching example, not one of the library's maintained
+# systems -- but `make run_pendulum` builds it directly.
+run_pendulum: run_pendulum.cu $(HEADERS)
+	@echo "==> Building Pendulum generic runner"
+	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
 # Add other rules for other executables here...
 
 # Rule to clean up all compiled files
 clean:
 	@echo "==> Cleaning up build files..."
-	rm -f run_horton run_standard_map run_henon_heiles
+	rm -f run_horton run_standard_map run_henon_heiles run_pendulum
 	$(MAKE) -C tests clean
 
 # Builds and runs the test suite (see tests/README.md). Each test is a

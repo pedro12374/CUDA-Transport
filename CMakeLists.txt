@@ -79,6 +79,12 @@ endfunction()
 add_cudat_driver(run_horton run_horton.cu)
 add_cudat_driver(run_standard_map run_standard_map.cu)
 add_cudat_driver(run_henon_heiles run_henon_heiles.cu)
+# TUTORIAL.md's worked example -- a teaching example, still built by
+# default (unlike the Makefile, CMake has no cheap way to exclude a target
+# from the default `all` without EXCLUDE_FROM_ALL, which would also drop
+# it from `cmake --build . --target run_pendulum`; not worth the tradeoff
+# for one extra small binary).
+add_cudat_driver(run_pendulum run_pendulum.cu)
 
 # ---- Test suite (tests/test_*.cu) ----
 enable_testing()
