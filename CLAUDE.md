@@ -60,25 +60,15 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
     continuous-time (RK4-integrated) systems like `HortonSystem`.
   - `map_escape.cuh`, `map_lyapunov.cuh`, `map_msd.cuh` — for discrete maps
     like `StandardMap`.
-- `cuda_dynamics_lib/src/*.cu` (`escape_solver.cu`, `lyapunov_solver.cu`,
-  `msd_solver.cu`) — **dead code**: byte-for-byte duplicates of the map-solver
-  logic now living in the `.cuh` headers (plus an explicit template
-  instantiation for `StandardMap` at the bottom of each). Nothing in the
-  Makefile compiles/links these (`LIB_SRC`/`LIB_OBJ` are computed but never
-  used in any target's recipe). Superseded by the header-only versions.
 - `maps/horton.h` — `HortonSystem`/`HortonSystemParams` (three-wave drift ODE)
   + `SystemTraits<HortonSystem>` (periodic wrap in y, escape in x). Current,
   actively used by `main_horton_escape.cu` and `main_horton_msd.cu`.
 - `maps/standard_map.h` — `StandardMap` discrete map + `MapTraits<StandardMap>`.
-  Used only by the `.bkp` drivers and the dead `src/*.cu` files; no live
-  Makefile target builds it right now.
-- `main.cu` — **stale**: references `ThreeWaveSystem`/`ThreeWaveSystemParams`,
-  which do not exist anywhere in the repo (renamed to `HortonSystem` at some
-  point and `main.cu` never updated). Not part of `make all`, only reachable
-  via the unused `dynamics_simulator` target. Needs a decision from the user
-  (fix as a stroboscopic-map driver for `HortonSystem`, or delete).
+  Used only by the `.bkp` drivers; no live Makefile target builds it right now.
 - `main_horton_escape.cu`, `main_horton_msd.cu` — the two live drivers built
-  by `make all` (targets `horton_escape`, `horton_msd`).
+  by `make all` (targets `horton_escape`, `horton_msd`). Both take an
+  optional first CLI argument overriding `FINAL_TIME` (default 1e5), e.g.
+  `./horton_msd 1e4`.
 - `main_Escape.cu.bkp`, `main_PS.cu.bkp` — backup drivers for `StandardMap`
   (CPU-side escape-time and phase-space calculation via
   `calculate_escape_time`/`calculate_phase_space`, not currently wired into
@@ -104,3 +94,52 @@ Two things flagged to the user during Phase 1 are now resolved:
 `main.cu` (stale `ThreeWaveSystem` references) and the dead
 `cuda_dynamics_lib/src/*.cu` duplicates were both deleted with the user's
 explicit go-ahead.
+
+## Phase 2 (correctness review) — what changed
+
+- **Fixed, no behavior change**: int-overflow risk in the `ode_*.cuh`
+  per-thread index (`int` → `long long`, matching how `map_*.cuh` already
+  did it via grid-stride loops), and missing `cudaGetLastError()` checks
+  after two kernel launches.
+- **Fixed, behavior change (approved by user)**: `ode_strobo.cuh` no longer
+  drifts off the nominal `p*tau` clock when `tau` isn't an exact multiple of
+  `dt` — it now takes a final partial RK4 step to land exactly on `tau`.
+  Not used by any current driver (only `main.cu`, deleted in Phase 1, called
+  it), but part of the generic library surface.
+- **Batching (approved by user)**: `calculate_ode_escape` and
+  `calculate_ode_msd_and_displacement` used to run the entire step loop
+  (up to ~1e7 steps × ~1e6 particles = ~1e13 RK4 evaluations) inside one
+  kernel launch — bad for a shared, scheduler-less GPU. Both now loop on the
+  host in batches (`steps_per_batch`, default 20000), persisting per-particle
+  state in device memory between launches. Verified bit-identical (escape)
+  / matching-to-FP-noise (MSD, via non-associative `atomicAdd` ordering)
+  against the old single-launch behavior.
+- **MSD output size (approved by user)**: `calculate_ode_msd_and_displacement`
+  now records ~300 logarithmically-spaced samples instead of one value per
+  step (was 80MB/pair at 1e7 steps). The physical sample times are returned
+  separately and `main_horton_msd.cu` saves them once as a shared
+  `MSD_sample_times` HDF5 dataset (same for every (A2,A3) pair) instead of
+  duplicating a time axis per pair. `Py/plotting_lib.py`'s `_plot_msd` was
+  updated to read this dataset instead of assuming uniform `0.01` spacing.
+- **`FINAL_TIME`**: made CLI-overridable in both drivers (optional first
+  argument), default unchanged at `1e5`.
+- Validated the core integrator itself with a GPU-vs-independently-written-
+  CPU-RK4 comparison (8 ICs × 50 steps through the real stroboscopic
+  solver): max difference 2.7e-15.
+
+## Python environment note
+
+`Py/plotting_lib.py` currently fails to import in this user's shell:
+apt's `scipy` (1.6.0, from `/usr/lib/python3/dist-packages`) references
+`numpy.Inf`, which is gone in the `~/.local`-pip-installed `numpy` (2.0.2)
+that shadows the system one. This is pre-existing and unrelated to any
+change made here — flagged but not fixed (would mean upgrading `scipy` via
+`pip install --user --upgrade scipy` or similar, which affects the user's
+personal Python environment and wasn't asked for).
+
+## Project intent (see also memory: `project-generic-tool-goal`)
+
+This library is meant to be a **generic** CUDA tool for escape-basin/transport
+analysis — Horton and the Standard Map are test systems, not the point.
+Prefer fixes that preserve the "define a system + escape criterion, then run
+the existing solvers" plug-in architecture over Horton-specific special-casing.
