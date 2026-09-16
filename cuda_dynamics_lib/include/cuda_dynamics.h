@@ -164,10 +164,7 @@ inline void save_to_h5(const std::string& filename, const std::string& dset_name
  * @param dset_name Name for the new dataset.
  * @param grid The grid `data` was computed on (supplies the shape).
  * @param data Row-major data, `num_particles * grid.DIMS` doubles.
- *
- * @note Unlike save_to_h5(), HDF5 errors here are caught and logged to
- * stderr rather than thrown -- a pre-existing inconsistency between the
- * two functions, not deliberate API design; callers shouldn't rely on it.
+ * @throws std::runtime_error on any HDF5 error (file/dataset creation, write).
  */
 inline void save_displacement_components(const std::string& filename, const std::string& dset_name,
                                   const GridSetup& grid, const double* data) {
@@ -192,7 +189,11 @@ inline void save_displacement_components(const std::string& filename, const std:
         dataset.write(data, H5::PredType::NATIVE_DOUBLE);
 
     } catch (const H5::Exception& e) {
-        std::cerr << "HDF5 Error while saving component data: " << e.getDetailMsg() << std::endl;
+        // H5::Exception doesn't derive from std::exception, so rethrow as
+        // something that prints a useful message if left uncaught (matches
+        // save_to_h5()'s behavior; this used to be silently swallowed here,
+        // which let a failed component-data write look like a success).
+        throw std::runtime_error("HDF5 error while saving dataset '" + dset_name + "': " + e.getDetailMsg());
     }
 }
 
