@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "config.h"
 
 // Forward declaration of the MapTraits struct
 template <typename MapType>
@@ -78,4 +79,12 @@ struct MapTraits<StandardMap> {
         return 0.0; // No escape
     }
 };
+
+// Builds StandardMapParams from a resolved config (see config.h).
+template <>
+inline StandardMapParams load_params_for<StandardMapParams>(const Config& cfg) {
+    StandardMapParams p;
+    p.K = cfg.get_double("K", 0.5);
+    return p;
+}
 

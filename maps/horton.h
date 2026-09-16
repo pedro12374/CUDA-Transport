@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include "config.h"
 
 template <typename SystemType>
 struct SystemTraits;
@@ -146,3 +147,26 @@ struct SystemTraits<HortonSystem> {
         return 0;
     }
 };
+
+// Builds HortonSystemParams from a resolved config (see config.h). Defaults
+// match the values previously hardcoded in main_horton_escape.cu/
+// main_horton_msd.cu, so an incomplete config still runs something sensible.
+template <>
+inline HortonSystemParams load_params_for<HortonSystemParams>(const Config& cfg) {
+    HortonSystemParams p;
+    p.A1 = cfg.get_double("A1", 1.0);
+    p.A2 = cfg.get_double("A2", 0.0);
+    p.A3 = cfg.get_double("A3", 0.0);
+    p.kx1 = cfg.get_double("kx1", 6.0);
+    p.ky1 = cfg.get_double("ky1", 3.0);
+    p.w1  = cfg.get_double("w1", 0.476);
+    p.kx2 = cfg.get_double("kx2", -3.5);
+    p.ky2 = cfg.get_double("ky2", -1.5);
+    p.w2  = cfg.get_double("w2", 0.476);
+    p.kx3 = cfg.get_double("kx3", -2.5);
+    p.ky3 = cfg.get_double("ky3", -1.5);
+    p.w3  = cfg.get_double("w3", 0.476);
+    p.v2 = std::fabs(p.w2 / p.ky2 - p.w1 / p.ky1);
+    p.v3 = std::fabs(p.w3 / p.ky3 - p.w1 / p.ky1);
+    return p;
+}
