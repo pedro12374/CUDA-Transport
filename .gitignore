@@ -41,6 +41,7 @@
 /run_henon_heiles
 /tests/*.o
 /tests/bin/
+/build/
 
 # debug information files
 *.dwo
