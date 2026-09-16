@@ -38,6 +38,9 @@
 *.app
 /run_horton
 /run_standard_map
+/run_henon_heiles
+/tests/*.o
+/tests/bin/
 
 # debug information files
 *.dwo

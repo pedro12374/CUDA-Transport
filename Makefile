@@ -64,7 +64,7 @@ HEADERS := $(wildcard cuda_dynamics_lib/include/*.h) \
 # write a 4-line entry point .cu like run_horton.cu, and add a rule below.
 
 # Define all executables you want to build
-all: run_horton run_standard_map
+all: run_horton run_standard_map run_henon_heiles
 
 run_horton: run_horton.cu $(HEADERS)
 	@echo "==> Building Horton generic runner"
@@ -74,12 +74,25 @@ run_standard_map: run_standard_map.cu $(HEADERS)
 	@echo "==> Building Standard Map generic runner"
 	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
+run_henon_heiles: run_henon_heiles.cu $(HEADERS)
+	@echo "==> Building Henon-Heiles generic runner"
+	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
+
 # Add other rules for other executables here...
 
 # Rule to clean up all compiled files
 clean:
 	@echo "==> Cleaning up build files..."
-	rm -f run_horton run_standard_map
+	rm -f run_horton run_standard_map run_henon_heiles
+	$(MAKE) -C tests clean
+
+# Builds and runs the test suite (see tests/README.md). Each test is a
+# small, fast (well under a minute total), self-contained .cu that exits
+# nonzero on failure.
+test:
+	$(MAKE) -C tests \
+		HDF5_INC="$(HDF5_INC)" HDF5_LIB="$(HDF5_LIB)" \
+		CUDA_ARCH="$(CUDA_ARCH)" HOST_COMPILER="$(HOST_COMPILER)"
 
 # Phony targets are not files
-.PHONY: all clean
+.PHONY: all clean test
