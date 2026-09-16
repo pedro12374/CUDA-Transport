@@ -2,9 +2,9 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, TwoSlopeNorm, BoundaryNorm, ListedColormap
-from scipy.optimize import curve_fit
 
 import parana_theme as tema
+from basin_metrics import fit_diffusion_exponent
 
 tema.aplicar_tema()
 
@@ -75,18 +75,14 @@ def _plot_msd(ax, data, title, t, bounds=None): # bounds is unused but keeps sig
     are logarithmically spaced, not one-per-timestep, so this can't be
     reconstructed from len(data) and a fixed dt.
     """
-    # Power-law model for fitting: MSD = D * t^alpha
-    def power_law(t, D, alpha):
-        return D * (t**alpha)
-
-    # Fit the data (ignoring the first few points)
+    # Fit MSD(t) = D * t^alpha (ignoring the first few points); see
+    # basin_metrics.fit_diffusion_exponent for the fit itself.
     fit_start = 1
     if len(t) > fit_start:
-        popt, _ = curve_fit(power_law, t[fit_start:], data[fit_start:])
-        alpha = popt[1]
+        D, alpha, _D_err, _alpha_err = fit_diffusion_exponent(t, data, fit_start=fit_start)
         fit_label = f'$\\alpha \\approx {alpha:.2f}$'
-        ax.plot(t[fit_start:], power_law(t[fit_start:], *popt), 'r--', label=fit_label)
-    
+        ax.plot(t[fit_start:], D * (t[fit_start:] ** alpha), 'r--', label=fit_label)
+
     ax.loglog(t, data)
     ax.set_title(title)
     ax.set_xlabel("Time (t)")
