@@ -259,6 +259,37 @@ that's compile time, not test time):
   batched-vs-unbatched validation (previously only done ad hoc in scratch)
   into a permanent test, extended to also cover Henon-Heiles.
 
+## Phase 4: CMake build
+
+Added `CMakeLists.txt` as an alternative to the Makefile (both kept in
+sync, per the original phase instructions -- don't remove the Makefile
+until CMake is verified, and it's not being removed at all, just offered
+alongside). `mkdir build && cd build && cmake .. && make -j && ctest`.
+
+- `find_package(HDF5 REQUIRED COMPONENTS CXX)` works on this server with
+  zero manual hints -- Debian's serial HDF5 package ships a
+  `hdf5-serial.pc` pkg-config file CMake's FindHDF5 discovers automatically.
+  Verified empirically before relying on it (a minimal test CMakeLists.txt
+  first). If a future system doesn't have this, `-DHDF5_ROOT=...` is the
+  escape hatch.
+- Hit one real, non-obvious CMake/CUDA gotcha: `CMAKE_CUDA_ARCHITECTURES`
+  must be set **before** `project(... LANGUAGES CUDA)` -- CMake bakes the
+  default `-gencode` flags in during CUDA compiler detection, which
+  `project()` triggers. Setting it after silently has no effect. First
+  attempt (set after `project()`) silently compiled everything for
+  `compute_52` instead of the intended `sm_80`, which surfaced as a real
+  build error (`atomicAdd(double*,double)` needs compute capability >= 6.0,
+  used by the MSD kernels) rather than a silent wrong-architecture binary --
+  caught immediately, but worth knowing the ordering rule instead of
+  re-discovering it. Fixed, and also set `CUDA_ARCHITECTURES` explicitly as
+  a target property on every executable for defense in depth.
+- Test suite integrated via `enable_testing()`/`add_test()` per
+  `tests/test_*.cu` -- `ctest` runs all 5, same ~2s, same pass/fail as
+  `make test`. Verified both a full `ctest` run and that a CMake-built
+  `run_horton` binary actually executes correctly (tiny config, real HDF5
+  output), not just that it compiles.
+- `build/` is gitignored; out-of-source only.
+
 ## Basin quantifiers (Py/basin_metrics.py)
 
 Per the user's request (2026-09-16): added basin entropy, basin boundary

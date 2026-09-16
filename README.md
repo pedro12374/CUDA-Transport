@@ -31,8 +31,9 @@ Improve how simulations are configured and executed.
 - [x] **Implement Configuration Files:** Instead of hardcoding simulation parameters (A2/A3 values, grid size, number of iterations) in the `main` files, move them to an external configuration file (e.g., `config.json` or `params.txt`).
     - [x] Modify the `main` executables to read these configuration files at startup.
     - Done via a generic, config-driven runner rather than per-driver parsing: see `cuda_dynamics_lib/include/config.h`/`runner.cuh` and `configs/*.cfg`. A dependency-free `key = value` format was used instead of JSON (no JSON dev headers installed on the dev server, no passwordless sudo to add one).
-- [ ] **Migrate the Build System to CMake (Advanced):** To facilitate compilation across different systems, replace the `Makefile` with `CMake`.
-    - [ ] `CMake` can automatically find dependencies (HDF5, etc.), which makes compilation much easier for other users.
+- [x] **Migrate the Build System to CMake (Advanced):** To facilitate compilation across different systems, replace the `Makefile` with `CMake`.
+    - [x] `CMake` can automatically find dependencies (HDF5, etc.), which makes compilation much easier for other users.
+    - Added (`CMakeLists.txt`) as an alternative to the Makefile, per the original phase plan ("keep the Makefile working until CMake is verified") -- both build systems work and are kept in sync. `find_package(HDF5 COMPONENTS CXX)` finds it automatically via pkg-config, no manual path hints needed on this server. `mkdir build && cd build && cmake .. && make -j && ctest`.
 
 ### Medium Priority: Robustness & Testing
 
