@@ -48,24 +48,30 @@ LDFLAGS = -L$(HDF5_LIB) -Xlinker -rpath -Xlinker $(HDF5_LIB) -lhdf5_cpp -lhdf5
 
 # All library/map headers, so touching any of them triggers a rebuild.
 HEADERS := $(wildcard cuda_dynamics_lib/include/*.h) \
+           $(wildcard cuda_dynamics_lib/include/*.cuh) \
            $(wildcard cuda_dynamics_lib/include/solvers/*.cuh) \
            $(wildcard maps/*.h)
 
 # =============================================================================
 # ## BUILD RULES ##
 # =============================================================================
+#
+# Each dynamical system gets ONE generic driver binary (run_<system>),
+# config-file-driven (see configs/*.cfg) rather than one hand-written .cu
+# per calculation. Adding a new system: write its header under maps/ (the
+# functor + Traits + a load_params_for<> specialization -- see maps/horton.h
+# for a worked ODE example, maps/standard_map.h for a discrete-map one),
+# write a 4-line entry point .cu like run_horton.cu, and add a rule below.
 
 # Define all executables you want to build
-all: horton_msd horton_escape
+all: run_horton run_standard_map
 
-# Rule to build the Horton escape time simulator
-horton_escape: main_horton_escape.cu $(HEADERS)
-	@echo "==> Building Horton Escape simulator"
+run_horton: run_horton.cu $(HEADERS)
+	@echo "==> Building Horton generic runner"
 	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
-# Rule to build the Horton MSD simulator
-horton_msd: main_horton_msd.cu $(HEADERS)
-	@echo "==> Building Horton MSD simulator"
+run_standard_map: run_standard_map.cu $(HEADERS)
+	@echo "==> Building Standard Map generic runner"
 	$(NVCC) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(LDFLAGS)
 
 # Add other rules for other executables here...
@@ -73,7 +79,7 @@ horton_msd: main_horton_msd.cu $(HEADERS)
 # Rule to clean up all compiled files
 clean:
 	@echo "==> Cleaning up build files..."
-	rm -f horton_escape horton_msd
+	rm -f run_horton run_standard_map
 
 # Phony targets are not files
 .PHONY: all clean

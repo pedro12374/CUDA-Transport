@@ -36,8 +36,8 @@
 *.exe
 *.out
 *.app
-/horton_escape
-/horton_msd
+/run_horton
+/run_standard_map
 
 # debug information files
 *.dwo
