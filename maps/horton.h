@@ -49,6 +49,19 @@ struct HortonSystemParams {
 };
 
 /**
+ * @brief Derives `v2`/`v3` (co-moving-frame velocities of waves 2 and 3
+ * relative to wave 1) from the other fields already set on `p`. Single
+ * source of truth for this formula -- call after setting `w1,w2,w3` and
+ * `ky1,ky2,ky3`, whether building a HortonSystemParams from a config
+ * (load_params_for<HortonSystemParams> below) or by hand (as tests that
+ * construct HortonSystemParams directly do).
+ */
+inline void derive_horton_velocities(HortonSystemParams& p) {
+    p.v2 = std::fabs(p.w2 / p.ky2 - p.w1 / p.ky1);
+    p.v3 = std::fabs(p.w3 / p.ky3 - p.w1 / p.ky1);
+}
+
+/**
  * @brief The three-wave drift system: a 2D (x,y) flow forced by one
  * stationary wave (amplitude A1) and two waves (A2,A3) advecting past it
  * at velocities v2,v3, hence explicitly time-dependent whenever A2 or A3
@@ -294,7 +307,6 @@ inline HortonSystemParams load_params_for<HortonSystemParams>(const Config& cfg)
     p.kx3 = cfg.get_double("kx3", -2.5);
     p.ky3 = cfg.get_double("ky3", -1.5);
     p.w3  = cfg.get_double("w3", 0.476);
-    p.v2 = std::fabs(p.w2 / p.ky2 - p.w1 / p.ky1);
-    p.v3 = std::fabs(p.w3 / p.ky3 - p.w1 / p.ky1);
+    derive_horton_velocities(p);
     return p;
 }

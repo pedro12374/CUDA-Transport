@@ -37,8 +37,7 @@ static bool test_horton_convergence() {
         .kx2 = -3.5, .ky2 = -1.5, .w2 = 0.476,
         .kx3 = -2.5, .ky3 = -1.5, .w3 = 0.476,
     };
-    params.v2 = std::fabs(params.w2 / params.ky2 - params.w1 / params.ky1);
-    params.v3 = std::fabs(params.w3 / params.ky3 - params.w1 / params.ky1);
+    derive_horton_velocities(params);
 
     double ic[DIMS] = { 0.3, -1.1 };
 
