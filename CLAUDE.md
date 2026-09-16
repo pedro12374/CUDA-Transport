@@ -50,7 +50,7 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
   (`(16,16)`, `(16,16,2)`, `(100,)`), and value ranges all matched
   expectations (Phase 1, 2026-09-15).
 
-## Repo structure (as of Phase 0 inspection)
+## Repo structure
 
 - `cuda_dynamics_lib/include/cuda_dynamics.h` — core header: `GridSetup`,
   HDF5 save helpers, RK4 stepper (`rk4_step_t`), small device vector/matrix
@@ -60,19 +60,24 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
     continuous-time (RK4-integrated) systems like `HortonSystem`.
   - `map_escape.cuh`, `map_lyapunov.cuh`, `map_msd.cuh` — for discrete maps
     like `StandardMap`.
+- `cuda_dynamics_lib/include/config.h` — dependency-free `key = value` config
+  file reader (`Config`), plus parameter-sweep support (`enumerate_sweeps`)
+  and the `load_params_for<ParamsType>` extension point every system
+  specializes. See "Generic library architecture" below.
+- `cuda_dynamics_lib/include/runner.cuh` — `run_ode_generic<DIMS,SystemType,
+  ParamsType>` / `run_map_generic<DIMS,MapType,ParamsType>`: the actual
+  generic driver logic (grid setup, sweep loop, calculation dispatch, HDF5
+  output). System-agnostic; never needs editing to add a system.
 - `maps/horton.h` — `HortonSystem`/`HortonSystemParams` (three-wave drift ODE)
-  + `SystemTraits<HortonSystem>` (periodic wrap in y, escape in x). Current,
-  actively used by `main_horton_escape.cu` and `main_horton_msd.cu`.
-- `maps/standard_map.h` — `StandardMap` discrete map + `MapTraits<StandardMap>`.
-  Used only by the `.bkp` drivers; no live Makefile target builds it right now.
-- `main_horton_escape.cu`, `main_horton_msd.cu` — the two live drivers built
-  by `make all` (targets `horton_escape`, `horton_msd`). Both take an
-  optional first CLI argument overriding `FINAL_TIME` (default 1e5), e.g.
-  `./horton_msd 1e4`.
-- `main_Escape.cu.bkp`, `main_PS.cu.bkp` — backup drivers for `StandardMap`
-  (CPU-side escape-time and phase-space calculation via
-  `calculate_escape_time`/`calculate_phase_space`, not currently wired into
-  the Makefile).
+  + `SystemTraits<HortonSystem>` (periodic wrap in y, escape in x) +
+  `load_params_for<HortonSystemParams>`. The reference example of a
+  complete ODE system definition.
+- `maps/standard_map.h` — `StandardMap`/`StandardMapParams` discrete map +
+  `MapTraits<StandardMap>` + `load_params_for<StandardMapParams>`. The
+  reference example of a complete discrete-map system definition.
+- `run_horton.cu`, `run_standard_map.cu` — the trivial (~4 line) per-system
+  entry points; see "Generic library architecture" below.
+- `configs/*.cfg` — example/working config files for both systems.
 - `Py/` — current plotting stack: `plotting_lib.py` (all the `_plot_*`
   helpers + mosaic/matrix/individual plot generators), `run_plots.py` (driver
   script, reads from `../dat/*.h5`), `parana_theme.py` (color theme),
@@ -85,15 +90,10 @@ Re-check anything time-sensitive (GPU load, package versions) if it's been a whi
 
 ## Build status
 
-As of Phase 1, `make` (default target `all` → `horton_msd horton_escape`)
-builds both drivers cleanly with zero warnings under the default flags. See
-git log on the `cleanup` branch for what changed (HighFive → HDF5 C++ API,
-Makefile paths/deps/clean target, driver include/buffer/message fixes).
-
-Two things flagged to the user during Phase 1 are now resolved:
-`main.cu` (stale `ThreeWaveSystem` references) and the dead
-`cuda_dynamics_lib/src/*.cu` duplicates were both deleted with the user's
-explicit go-ahead.
+`make` (default target `all` → `run_horton run_standard_map`) builds both
+generic drivers cleanly with zero warnings under the default flags. See git
+log on the `cleanup` branch for full history (HighFive → HDF5 C++ API,
+Makefile fixes, Phase 2 correctness fixes, the generic-runner rewrite).
 
 ## Phase 2 (correctness review) — what changed
 
@@ -117,15 +117,65 @@ explicit go-ahead.
 - **MSD output size (approved by user)**: `calculate_ode_msd_and_displacement`
   now records ~300 logarithmically-spaced samples instead of one value per
   step (was 80MB/pair at 1e7 steps). The physical sample times are returned
-  separately and `main_horton_msd.cu` saves them once as a shared
-  `MSD_sample_times` HDF5 dataset (same for every (A2,A3) pair) instead of
-  duplicating a time axis per pair. `Py/plotting_lib.py`'s `_plot_msd` was
-  updated to read this dataset instead of assuming uniform `0.01` spacing.
-- **`FINAL_TIME`**: made CLI-overridable in both drivers (optional first
-  argument), default unchanged at `1e5`.
+  separately and saved once as a shared `MSD_sample_times` HDF5 dataset
+  (same for every sweep combination) instead of duplicating a time axis per
+  dataset. `Py/plotting_lib.py`'s `_plot_msd` was updated to read this
+  dataset instead of assuming uniform `0.01` spacing.
 - Validated the core integrator itself with a GPU-vs-independently-written-
   CPU-RK4 comparison (8 ICs × 50 steps through the real stroboscopic
   solver): max difference 2.7e-15.
+- (`FINAL_TIME` was briefly made CLI-overridable on the old drivers; that's
+  now superseded by the config file's `final_time` key, which is strictly
+  more general — see below.)
+
+## Generic library architecture
+
+Per the user's explicit request (2026-09-16): the point of this repo is a
+**generic** transport/escape-basin analysis tool, not a Horton-specific one.
+`main_horton_escape.cu`/`main_horton_msd.cu` (one hand-written driver per
+system x calculation, with everything hardcoded) were replaced by:
+
+1. **A system header** (`maps/horton.h`, `maps/standard_map.h`) — the
+   complete definition of a dynamical system: the functor (`operator()`
+   [+ `jacobian` for Lyapunov]), `SystemTraits<T>` (ODE: `post_step_update`,
+   `check_escape`) or `MapTraits<T>` (map: `msd_dimension_index`,
+   `check_escape`), and a `load_params_for<ParamsType>` specialization that
+   builds the params struct from a `Config`. This is the interface a new
+   system must implement (candidate content for the TUTORIAL.md in Phase 5).
+2. **The generic runner** (`cuda_dynamics_lib/include/runner.cuh`):
+   `run_ode_generic<DIMS, SystemType, ParamsType>` and
+   `run_map_generic<DIMS, MapType, ParamsType>`. Reads a config file, sets up
+   `GridSetup`, dispatches to whichever `calculate_*` solver the config's
+   `calculation` key names (`escape`/`msd`/`lyapunov`/`stroboscopic` for ODE;
+   `escape`/`msd`/`lyapunov`/`phasespace` for maps), saves HDF5 output.
+   Never needs editing to add a system or run a different calculation.
+3. **A ~4-line per-system entry point** (`run_horton.cu`,
+   `run_standard_map.cu`): `#include` the system header + `runner.cuh`, call
+   `run_ode_generic<...>` or `run_map_generic<...>` from `main`. This is the
+   one place "is this a map or an ODE" gets decided, by which function is
+   called (DIMS is also fixed here, at compile time — templates can't be
+   runtime-polymorphic without type erasure, which would cost the
+   zero-overhead device-functor design this library already relies on).
+4. **Config files** (`configs/*.cfg`) — dependency-free `key = value` text
+   (`cuda_dynamics_lib/include/config.h`; no JSON library needed/installed).
+   Any value with a comma becomes a parameter sweep axis (cartesian product
+   across all swept keys), except `grid_dims`/`grid_min`/`grid_max` which are
+   always fixed-length per-dimension vectors. Dataset names get a
+   `_key_value_key_value` suffix built from the swept keys in file order --
+   `configs/horton_escape.cfg`'s `A2`/`A3` sweep reproduces the exact
+   `EscapeTime_A2_..._A3_...` naming the old driver + `Py/plotting_lib.py`
+   already expected, so nothing downstream needed to change.
+
+Adding a brand new system to the library: write one header (functor +
+traits + `load_params_for`), write one ~4-line entry-point .cu, add one
+Makefile rule, write a config file. No solver or runner code touched.
+
+Verified: `configs/horton_escape.cfg` and `configs/horton_msd.cfg` run
+through `run_horton` at tiny scale (16x16 grid) produce byte-identical MSD
+values to the old `main_horton_msd.cu` driver's Phase 2 smoke-test output --
+confirms the rewrite preserved behavior exactly, not just "runs without
+crashing." `run_standard_map` + `configs/standard_map_escape.cfg` exercises
+the discrete-map path end-to-end as a second worked example.
 
 ## Python environment note
 
