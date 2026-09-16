@@ -362,6 +362,45 @@ Validated (not just unit-tested) against a real Henon-Heiles basin scan
 (verified by running the actual plot function end-to-end, working around
 the LaTeX issue below to isolate the check to just this code path).
 
+## Phase 5: documentation
+
+- **Doxygen**: comments added throughout `cuda_dynamics_lib/include/`
+  (config.h, cuda_dynamics.h, runner.cuh, all 7 solvers/*.cuh) and the
+  three system headers, with the fullest documentation on
+  `load_params_for<>` (config.h, the actual extension point) and
+  `HortonSystem::operator()`/`jacobian()` (maps/horton.h, the primary
+  worked example) per the original plan's emphasis on documenting "the
+  interface a new dynamical system must implement." A `Doxyfile` was
+  added (`doxygen` itself isn't installed on this server, so its syntax
+  was checked by hand against the Doxygen manual, not by actually
+  running it -- flagged in the file's own header comment). Found and
+  fixed a few stale comments along the way (not code): standard_map.h
+  claimed momentum was wrapped directly above a commented-out fmod()
+  call (it's deliberately not wrapped); map_msd.cuh's unused
+  min_bounds/max_bounds params referenced main.cu, deleted in Phase 1.
+- **TUTORIAL.md**: built a fourth system from scratch (a driven, damped
+  pendulum, `maps/pendulum.h`) specifically to write the tutorial
+  against, rather than describing the existing three secondhand. Every
+  command and number in the tutorial was actually run (and re-verified
+  once more after a context reset mid-Phase-5) -- escape fractions at
+  three driving amplitudes (0%, 75.8%, 35.3%), the exact plotting_lib.py
+  call and the filenames it produces, the basin_metrics.py call.
+  Along the way found and fixed two real, pre-existing bugs in
+  `Py/plotting_lib.py` that the pendulum's basin plot exposed:
+  `generate_individual_plots()` built dataset names at `.2f` precision
+  while the C++ generic runner's sweep suffixes are always `.4f` (see
+  `enumerate_sweeps()` in config.h) -- would have silently failed to
+  find any dataset the new pipeline produces; and all three plot
+  generators passed `_plot_escape_basin`'s `{"label":...,"ticks":...}`
+  dict straight through as `fig.colorbar()`'s `label=`, so every basin
+  plot's colorbar showed the dict's repr instead of "Escape Basin" with
+  clean `[-1,0,1]` ticks (new `_add_colorbar()` helper fixes both cases).
+- **README.md**: full rewrite (description, dependencies, both build
+  systems, quick start, calculation-type/config-key reference, testing,
+  docs pointers), replacing the old empty-README-plus-roadmap-checklist.
+  Every command in the quick start was run against a scaled-down copy
+  of the real Horton config to confirm it works as written.
+
 ## Python environment note
 
 `Py/plotting_lib.py` currently fails to import in this user's shell:
