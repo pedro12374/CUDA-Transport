@@ -148,6 +148,20 @@ struct SystemTraits<HortonSystem> {
     }
 };
 
+// Co-moving-frame stream function for the SINGLE-WAVE case (A2 = A3 = 0),
+// where the system is autonomous and this quantity is exactly conserved
+// along any trajectory (see tests/test_conservation.cu):
+//   dx/dt = A1*ky1*sin(kx1*x)*sin(ky1*y) = d(psi)/dy
+//   dy/dt = A1*kx1*cos(kx1*x)*cos(ky1*y) = -d(psi)/dx
+// with psi(x,y) = -A1*sin(kx1*x)*cos(ky1*y) (verified by direct
+// differentiation). NOT conserved when A2 or A3 != 0: those terms make the
+// system explicitly time-dependent (through v2*t, v3*t), so there's no
+// autonomous stream function for the full three-wave system.
+__host__ __device__ inline double horton_single_wave_stream_function(
+    const double state[2], const HortonSystemParams& params) {
+    return -params.A1 * sin(params.kx1 * state[0]) * cos(params.ky1 * state[1]);
+}
+
 // Builds HortonSystemParams from a resolved config (see config.h). Defaults
 // match the values previously hardcoded in main_horton_escape.cu/
 // main_horton_msd.cu, so an incomplete config still runs something sensible.
