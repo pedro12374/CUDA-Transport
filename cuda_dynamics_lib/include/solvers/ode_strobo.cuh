@@ -19,6 +19,19 @@ __device__ void integrate_for_tau_device(
         double current_t = start_time + static_cast<double>(i) * dt;
         rk4_step_t<DIMS, SystemType, ParamsType>(state, current_t, dt, system, params);
     }
+
+    // tau isn't generally an exact multiple of dt, so the loop above lands
+    // short of tau by a remainder in [0, dt). Take one final partial-dt
+    // step to land exactly on tau -- otherwise each interval's state would
+    // silently fall further and further behind the nominal p*tau clock
+    // used to seed the next interval, desyncing the time-dependent forcing
+    // terms from the true integrated time.
+    double elapsed = static_cast<double>(num_steps) * dt;
+    double remaining = tau - elapsed;
+    if (remaining > 1e-12 * dt) {
+        double current_t = start_time + elapsed;
+        rk4_step_t<DIMS, SystemType, ParamsType>(state, current_t, remaining, system, params);
+    }
 }
 
 
