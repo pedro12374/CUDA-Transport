@@ -129,16 +129,26 @@ def _add_colorbar(fig, im, ax_target, cbar_label, **kwargs):
         fig.colorbar(im, ax=ax_target, label=cbar_label, **kwargs)
 
 
-def _read_msd_sample_times(f, data):
+def _read_msd_sample_times(f, data, dset_name=None):
     """
-    Reads the companion 'MSD_sample_times' dataset an ODE system's
-    calculation=msd run saves (see runner.cuh's run_ode_generic) -- but a
-    discrete-map system's calculation=msd run (run_map_generic) writes a
-    dense, one-sample-per-iteration MSD with no such dataset (see
-    ode_msd.cuh/map_msd.cuh's docs for why the two calculation types differ).
-    Falls back to treating each sample as one iteration (np.arange) in that
-    case, instead of a bare KeyError.
+    Reads the companion sample-times dataset an ODE system's calculation=msd
+    run saves (see runner.cuh's run_ode_generic) -- but a discrete-map
+    system's calculation=msd run (run_map_generic) writes a dense,
+    one-sample-per-iteration MSD with no such dataset (see ode_msd.cuh/
+    map_msd.cuh's docs for why the two calculation types differ). Falls
+    back to treating each sample as one iteration (np.arange) in that case,
+    instead of a bare KeyError.
+
+    Usually a single 'MSD_sample_times' is shared across every sweep
+    combination in the file, but if a combination's final_time/msd_samples
+    differs from the rest (an unusual, if legal, thing to sweep), the C++
+    side saves that combination its own 'MSD_sample_times_<suffix>' instead
+    (see run_ode_generic's msd branch) -- prefer that one when it exists.
     """
+    if dset_name and dset_name.startswith("MSD_"):
+        per_combo_name = "MSD_sample_times_" + dset_name[len("MSD_"):]
+        if per_combo_name in f:
+            return f[per_combo_name][:]
     if "MSD_sample_times" in f:
         return f["MSD_sample_times"][:]
     return np.arange(len(data))
@@ -181,7 +191,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
         try:
             with h5py.File(h5_file, 'r') as f:
                 data = f[dset_name][:]
-                msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
+                msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
             title = f"{dset_prefix.split('_')[-1]} = {p_val}"
             
@@ -259,7 +269,7 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
             try:
                 with h5py.File(h5_file, 'r') as f:
                     data = f[dset_name][:]
-                    msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
+                    msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
                 # Call the appropriate internal plotting function
                 if plot_type == 'escape':
@@ -322,7 +332,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     try:
         with h5py.File(h5_file, 'r') as f:
             data = f[dset_name][:]
-            msd_t = _read_msd_sample_times(f, data) if plot_type == 'msd' else None
+            msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
         plot_title = title if title else dset_name
         

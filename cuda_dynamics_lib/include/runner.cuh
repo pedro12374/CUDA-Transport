@@ -138,6 +138,8 @@ inline int run_ode_generic(int argc, char** argv) {
                   << calculation << "', " << grid.num_particles << " particles" << std::endl;
 
         bool saved_msd_times = false;
+        double shared_msd_final_time = 0.0;
+        int shared_msd_num_samples = 0;
 
         for (size_t i = 0; i < sweeps.size(); ++i) {
             const Config& cfg = sweeps[i].config;
@@ -178,10 +180,23 @@ inline int run_ode_generic(int argc, char** argv) {
                     total_steps, dt, h_total_disp.data(), h_disp.data(), h_msd, h_msd_t,
                     num_samples, steps_per_batch);
 
+                // MSD_sample_times is shared across combinations ONLY when
+                // final_time/msd_samples are actually the same for all of
+                // them (the common case -- sweeping a physical parameter
+                // like A2/A3, not the integration/sampling settings). If a
+                // later combination's final_time or msd_samples differs
+                // (both are legal, if unusual, sweep keys), its sample
+                // times are genuinely different and get their own
+                // per-combination dataset instead of silently reusing the
+                // first combination's, which would otherwise mismatch.
+                std::vector<size_t> t_dims = { h_msd_t.size() };
                 if (!saved_msd_times) {
-                    std::vector<size_t> t_dims = { h_msd_t.size() };
                     save_to_h5(output_file, "MSD_sample_times", t_dims, h_msd_t.data());
                     saved_msd_times = true;
+                    shared_msd_final_time = final_time;
+                    shared_msd_num_samples = num_samples;
+                } else if (final_time != shared_msd_final_time || num_samples != shared_msd_num_samples) {
+                    save_to_h5(output_file, "MSD_sample_times" + dset_suffix, t_dims, h_msd_t.data());
                 }
 
                 std::vector<size_t> msd_dims = { h_msd.size() };
