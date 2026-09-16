@@ -246,21 +246,18 @@ inline void calculate_ode_msd_and_displacement(
     CUDA_CHECK(cudaMemset(d_msd_p, 0, num_samples * sizeof(double)));
     CUDA_CHECK(cudaMemcpy(d_sample_steps, sample_steps.data(), num_samples * sizeof(int), cudaMemcpyHostToDevice));
 
-    int steps_done = 0;
-    while (steps_done < num_steps) {
-        int this_batch = (num_steps - steps_done < steps_per_batch) ? (num_steps - steps_done) : steps_per_batch;
+    run_in_batches(num_steps, steps_per_batch, [&](int step_offset, int steps_this_batch) {
         int sample_start_idx = static_cast<int>(
-            std::lower_bound(sample_steps.begin(), sample_steps.end(), steps_done) - sample_steps.begin());
+            std::lower_bound(sample_steps.begin(), sample_steps.end(), step_offset) - sample_steps.begin());
 
         ode_msd_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
-            system_functor, params, steps_done, this_batch, dt, num_particles, d_init,
+            system_functor, params, step_offset, steps_this_batch, dt, num_particles, d_init,
             d_sample_steps, num_samples, sample_start_idx,
             d_state_wrapped, d_state_unwrapped, d_total_disp, d_disp, d_msd_p);
 
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
-        steps_done += this_batch;
-    }
+    });
 
     CUDA_CHECK(cudaMemcpy(h_total_displacement, d_total_disp, num_particles * sizeof(double), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_displacements, d_disp, num_particles * DIMS * sizeof(double), cudaMemcpyDeviceToHost));

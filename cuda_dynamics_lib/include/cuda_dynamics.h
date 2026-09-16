@@ -287,6 +287,37 @@ __device__ inline void rk4_step_t(
 template <typename MapType>
 struct MapTraits;
 
+/**
+ * @brief Splits `[0, total)` into consecutive batches of at most
+ * `batch_size` steps, calling `launch_batch(step_offset, steps_this_batch)`
+ * once per batch. Used by the batched escape/MSD solvers (ode_escape.cuh,
+ * ode_msd.cuh) to avoid running an entire long integration as one kernel
+ * launch -- see either file's top comment for why that matters on a
+ * shared GPU. Factored out here so both solvers share one implementation
+ * (and one validation) instead of two independently-maintained copies.
+ *
+ * @param total Total number of steps to cover.
+ * @param batch_size Steps per batch.
+ * @param launch_batch Called as `launch_batch(step_offset, steps_this_batch)`
+ * for each batch, in order, covering `[0, total)` exactly once.
+ * @throws std::invalid_argument if `batch_size <= 0` -- silently looping
+ * forever (steps_done never advancing, or regressing) is worse than a
+ * clear error naming the actual mistake.
+ */
+template <typename LaunchBatchFn>
+inline void run_in_batches(int total, int batch_size, LaunchBatchFn&& launch_batch) {
+    if (batch_size <= 0) {
+        throw std::invalid_argument(
+            "run_in_batches: batch_size must be > 0, got " + std::to_string(batch_size));
+    }
+    int steps_done = 0;
+    while (steps_done < total) {
+        int this_batch = (total - steps_done < batch_size) ? (total - steps_done) : batch_size;
+        launch_batch(steps_done, this_batch);
+        steps_done += this_batch;
+    }
+}
+
 
 // =============================================================================
 // == Public Function Declarations for GPU Solvers

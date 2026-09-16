@@ -119,18 +119,14 @@ inline void calculate_ode_escape( // Renamed for clarity
     CUDA_CHECK(cudaMemcpy(d_escape_t, h_no_escape.data(), num_particles * sizeof(double), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemset(d_escape_b, 0, num_particles * sizeof(double))); // 0.0 is an all-zero-bytes bit pattern
 
-    int steps_done = 0;
-    while (steps_done < max_steps) {
-        int this_batch = (max_steps - steps_done < steps_per_batch) ? (max_steps - steps_done) : steps_per_batch;
-
+    run_in_batches(max_steps, steps_per_batch, [&](int step_offset, int steps_this_batch) {
         ode_escape_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
-            system_functor, params, steps_done, this_batch, dt, num_particles,
+            system_functor, params, step_offset, steps_this_batch, dt, num_particles,
             d_state, d_escape_t, d_escape_b);
 
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
-        steps_done += this_batch;
-    }
+    });
 
     CUDA_CHECK(cudaMemcpy(h_escape_times, d_escape_t, num_particles * sizeof(double), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_escape_basins, d_escape_b, num_particles * sizeof(double), cudaMemcpyDeviceToHost)); // Copy back basins
