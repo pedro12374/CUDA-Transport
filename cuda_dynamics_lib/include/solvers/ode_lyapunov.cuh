@@ -36,14 +36,23 @@ __global__ void ode_lyapunov_kernel(
         state[j] = d_initial_conditions[idx * DIMS + j];
     }
 
-    double tangent_vec[DIMS] = {1.0, 0.0}; // Initial tangent vector (NOTE: this
-        // brace-init only explicitly sets the first 2 components; for DIMS > 2
-        // the rest are zero-initialized, i.e. the initial tangent vector is
-        // (1,0,0,...,0). Still a valid starting direction -- the dominant
-        // Lyapunov exponent's growth rate is what the algorithm converges to
-        // regardless of initial direction, barring the zero-probability case
-        // of starting exactly along an invariant subspace -- just not
-        // obviously "DIMS-aware" to someone skimming this line.
+    // Initial tangent vector: all-ones (normalized below), not a coordinate
+    // basis vector like (1,0,...,0). The starting direction doesn't affect
+    // the converged Lyapunov exponent for a generic trajectory -- except
+    // when it lies exactly in an invariant subspace of the linearized
+    // dynamics, which a basis vector can: e.g. Henon-Heiles' Jacobian
+    // decouples into an (x,px) block and a (y,py) block whenever a
+    // trajectory sits on the x=px=0 symmetric orbit (a common initial
+    // condition, e.g. y-py Poincare-section grids), so (1,0,0,0) would stay
+    // confined to the (x,px) block forever. For Henon-Heiles specifically
+    // that block happens to carry the equal-or-larger exponent (the (y,py)
+    // block alone is a bound 1-DOF system, always exactly integrable, so
+    // its own confined exponent is 0), so this didn't produce a
+    // demonstrably wrong answer there -- but relying on that coincidence
+    // isn't sound for other systems/symmetries, so this is fixed generally.
+    double tangent_vec[DIMS];
+    for (int j = 0; j < DIMS; ++j) tangent_vec[j] = 1.0;
+    normalize_vector<DIMS>(tangent_vec, vector_norm<DIMS>(tangent_vec));
     double jacobian[DIMS * DIMS];
     double sum_of_logs = 0.0;
 

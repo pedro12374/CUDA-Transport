@@ -34,10 +34,13 @@ __global__ void lyapunov_kernel_generic(
         }
 
         // --- State variables for the tangent vector ---
+        // All-ones (normalized), not a coordinate basis vector -- see
+        // ode_lyapunov.cuh's matching comment for why a basis vector like
+        // (1,0,...,0) can coincide with an invariant subspace of the
+        // linearized dynamics for some systems/initial conditions.
         double tangent_vector[DIMS];
-        for (int j = 0; j < DIMS; ++j) {
-            tangent_vector[j] = (j == 0) ? 1.0 : 0.0; // Start with a basis vector
-        }
+        for (int j = 0; j < DIMS; ++j) tangent_vector[j] = 1.0;
+        normalize_vector<DIMS>(tangent_vector, vector_norm<DIMS>(tangent_vector));
         double jacobian[DIMS * DIMS];
         double sum_of_logs = 0.0;
 
