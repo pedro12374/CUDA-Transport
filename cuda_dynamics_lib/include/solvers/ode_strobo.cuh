@@ -33,7 +33,7 @@ __global__ void ode_stroboscopic_kernel(
     const double* d_initial_conditions,
     double* d_stroboscopic_map_out) // Output array
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     double state[DIMS];
@@ -81,6 +81,7 @@ inline void calculate_ode_stroboscopic_map(
     ode_stroboscopic_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
         system_functor, params, num_points, tau, dt, num_particles, d_init_cond, d_strobo_map);
 
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(h_stroboscopic_map_out, d_strobo_map, map_size, cudaMemcpyDeviceToHost));
 

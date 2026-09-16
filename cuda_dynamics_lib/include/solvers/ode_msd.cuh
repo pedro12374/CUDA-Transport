@@ -17,7 +17,7 @@ __global__ void ode_msd_kernel(
     double* d_displacements,
     double* d_msd)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     // --- State variables ---

@@ -15,7 +15,7 @@ __global__ void ode_lyapunov_kernel(
     const double* d_initial_conditions,
     double* d_lyapunov_exp)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     double state[DIMS];
