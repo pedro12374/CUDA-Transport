@@ -103,10 +103,21 @@ __global__ void ode_msd_kernel(
         // --- 1. Record MSD only at the chosen log-spaced sample steps ---
         // This uses the "true" unwrapped trajectory, measured at the start
         // of the step (matches the original one-sample-per-step behavior).
+        // MSD is a position-space transport diagnostic, summed over the
+        // first min(DIMS,2) state components -- every system in this
+        // library lists position coordinates first (e.g. Henon-Heiles'
+        // (x,y,px,py): x,y are position, px,py momentum, intentionally
+        // excluded here -- summing squared momentum differences into a
+        // "mean squared displacement" would be physically meaningless).
+        // DIMS==2 systems (Horton, Pendulum) are unaffected: "first 2" is
+        // "all of it" for them, so this is the same value as before.
         if (sample_idx < num_samples && d_sample_steps[sample_idx] == global_step) {
-            double dx = state_unwrapped[0] - initial_state[0];
-            double dy = state_unwrapped[1] - initial_state[1];
-            atomicAdd(&d_msd[sample_idx], dx * dx + dy * dy);
+            double sq_disp = 0.0;
+            for (int j = 0; j < DIMS && j < 2; ++j) {
+                double dj = state_unwrapped[j] - initial_state[j];
+                sq_disp += dj * dj;
+            }
+            atomicAdd(&d_msd[sample_idx], sq_disp);
             ++sample_idx;
         }
 
@@ -140,11 +151,18 @@ __global__ void ode_msd_kernel(
 
     // --- Final Displacement (recomputed every batch; only the last launch's
     //     write matters, and it's idempotent so that's harmless) ---
-    double final_dx = state_unwrapped[0] - initial_state[0];
-    double final_dy = state_unwrapped[1] - initial_state[1];
-    d_displacements[idx * DIMS + 0] = final_dx;
-    d_displacements[idx * DIMS + 1] = final_dy;
-    d_total_displacement[idx] = sqrt(final_dx * final_dx + final_dy * final_dy);
+    // d_displacements gets every component (position AND momentum, for a
+    // system like Henon-Heiles) -- unlike MSD above, there's no physical
+    // ambiguity here, it's just "how much did each coordinate change".
+    // d_total_displacement stays position-space-only (first min(DIMS,2)
+    // components), for the same reason as the MSD accumulator above.
+    double total_sq_disp = 0.0;
+    for (int j = 0; j < DIMS; ++j) {
+        double disp_j = state_unwrapped[j] - initial_state[j];
+        d_displacements[idx * DIMS + j] = disp_j;
+        if (j < 2) total_sq_disp += disp_j * disp_j;
+    }
+    d_total_displacement[idx] = sqrt(total_sq_disp);
 }
 
 
@@ -167,11 +185,18 @@ __global__ void ode_msd_kernel(
  * @param num_steps Integration steps.
  * @param dt Integration step size.
  * @param h_total_displacement [out] Host array, `num_particles` doubles:
- * `|final_state - initial_state|`.
+ * position-space `|final_state - initial_state|`, i.e. summed over only the
+ * first `min(DIMS,2)` state components (every system in this library lists
+ * position coordinates first; for a system with extra non-position
+ * components, e.g. Henon-Heiles' momenta, those are intentionally excluded
+ * here -- see this file's implementation comment for why).
  * @param h_displacements [out] Host array, `num_particles * DIMS` doubles:
- * `final_state - initial_state`, per component.
+ * `final_state - initial_state`, per component -- every component, position
+ * and otherwise (unlike h_total_displacement/h_msd_out, there's no
+ * position-space-only restriction here).
  * @param h_msd_out [out] Resized internally to the actual sample count;
- * `<Δx²+Δy²>` (averaged over particles) at each sampled step.
+ * position-space `<Δx²+Δy²>` (averaged over particles) at each sampled step
+ * -- same first-`min(DIMS,2)`-components convention as h_total_displacement.
  * @param h_msd_sample_times_out [out] Resized internally to match
  * `h_msd_out`; the physical time (`step * dt`) of each sample.
  * @param num_msd_samples Target number of log-spaced MSD samples (default 300).
