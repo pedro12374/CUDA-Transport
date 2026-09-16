@@ -57,8 +57,13 @@ private:
                 stride *= this->grid_res[i];
             }
             for (int j = 0; j < this->DIMS; ++j) {
-                h_initial_conditions[flat_idx * this->DIMS + j] =
-                    min_b[j] + (max_b[j] - min_b[j]) * indices[j] / (double)(this->grid_res[j] - 1);
+                // A single-point dimension (grid_res[j] == 1) fixes that
+                // coordinate at min_b[j] -- e.g. scanning (x0,y0) at a fixed
+                // (px0,py0) for a Hamiltonian system. Guards the division
+                // below, which would otherwise be 0/0.
+                h_initial_conditions[flat_idx * this->DIMS + j] = (this->grid_res[j] > 1)
+                    ? min_b[j] + (max_b[j] - min_b[j]) * indices[j] / (double)(this->grid_res[j] - 1)
+                    : min_b[j];
             }
         } else {
             for (int i = 0; i < this->grid_res[dim_idx]; ++i) {
