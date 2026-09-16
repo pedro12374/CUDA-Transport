@@ -1,21 +1,22 @@
-#pragma once // File: cuda_dynamics_lib/include/config.h
-//
-// A deliberately minimal, dependency-free "key = value" config file reader,
-// used to drive the generic runner (runner.cuh) so simulation parameters
-// don't have to be hardcoded/recompiled per run. No external JSON/TOML
-// library is required.
-//
-// File format:
-//   # comments start with '#' and run to end of line
-//   key = value
-//   A2 = 0.0, 0.5, 1.0          <- a comma-separated value makes this a
-//                                   sweep axis (see enumerate_sweeps below)
-//   grid_dims = 1024, 1024      <- EXCEPT grid_dims/grid_min/grid_max,
-//                                   which are always fixed-length
-//                                   per-dimension vectors, never swept
-//
-// Duplicate keys: the later occurrence wins, but the key keeps its
-// original position for ordering purposes (sweep-suffix order, entries()).
+#pragma once
+/**
+ * @file config.h
+ * @brief Dependency-free "key = value" config file reader, parameter
+ * sweeps, and the load_params_for<> extension point new systems implement.
+ *
+ * No external JSON/TOML library is required or used. File format:
+ * @code
+ *   # comments start with '#' and run to end of line
+ *   key = value
+ *   A2 = 0.0, 0.5, 1.0          # a comma-separated value makes this a
+ *                                # sweep axis (see enumerate_sweeps())
+ *   grid_dims = 1024, 1024      # EXCEPT grid_dims/grid_min/grid_max,
+ *                                # which are always fixed-length
+ *                                # per-dimension vectors, never swept
+ * @endcode
+ * Duplicate keys: the later occurrence wins, but the key keeps its
+ * original position for ordering purposes (sweep-suffix order, entries()).
+ */
 
 #include <string>
 #include <vector>
@@ -25,10 +26,26 @@
 #include <algorithm>
 #include <iomanip>
 
+/**
+ * @brief An in-memory, ordered "key = value" store loaded from a config
+ * file, with typed accessors (get_double(), get_int(), ...) and default
+ * values. See config.h's file-level docs for the on-disk format.
+ *
+ * A Config is small and cheap to copy -- enumerate_sweeps() returns one
+ * full copy per sweep combination, each with a single value substituted
+ * for every swept key.
+ */
 class Config {
 public:
     Config() = default;
 
+    /**
+     * @brief Parses a config file from disk.
+     * @param filename Path to the config file.
+     * @return The parsed key/value store.
+     * @throws std::runtime_error if the file can't be opened, or a
+     * non-blank/non-comment line isn't of the form `key = value`.
+     */
     static Config load(const std::string& filename) {
         Config cfg;
         std::ifstream in(filename);
@@ -59,51 +76,68 @@ public:
         return cfg;
     }
 
+    /** @brief Whether `key` is present. */
     bool has(const std::string& key) const {
         return find(key) != entries_.end();
     }
 
-    // Overwrites the key's value if present (keeping its original
-    // position), otherwise appends it.
+    /**
+     * @brief Sets `key` to `value`, overwriting it in place if already
+     * present (keeping its original file-order position), else appending.
+     */
     void set(const std::string& key, const std::string& value) {
         auto it = find(key);
         if (it != entries_.end()) it->second = value;
         else entries_.emplace_back(key, value);
     }
 
+    /** @brief Returns `key`'s raw string value. @throws std::runtime_error if missing. */
     std::string get_string(const std::string& key) const { return raw(key); }
+    /** @brief Returns `key`'s raw string value, or `default_value` if `key` is absent. */
     std::string get_string(const std::string& key, const std::string& default_value) const {
         return has(key) ? raw(key) : default_value;
     }
 
+    /** @brief Parses `key`'s value as a double. @throws std::runtime_error if missing or not a number. */
     double get_double(const std::string& key) const {
         return parse_double(key, raw(key));
     }
+    /** @brief Parses `key`'s value as a double, or returns `default_value` if `key` is absent. */
     double get_double(const std::string& key, double default_value) const {
         return has(key) ? get_double(key) : default_value;
     }
 
+    /** @brief Parses `key`'s value as an int. @throws std::runtime_error if missing or not an integer. */
     int get_int(const std::string& key) const {
         return parse_int(key, raw(key));
     }
+    /** @brief Parses `key`'s value as an int, or returns `default_value` if `key` is absent. */
     int get_int(const std::string& key, int default_value) const {
         return has(key) ? get_int(key) : default_value;
     }
 
-    // Splits a comma-separated value, e.g. for grid_dims/grid_min/grid_max.
+    /**
+     * @brief Splits `key`'s value on commas and parses each token as a
+     * double, e.g. for `grid_min`/`grid_max` (one entry per dimension).
+     * @throws std::runtime_error if missing or any token isn't a number.
+     */
     std::vector<double> get_double_list(const std::string& key) const {
         std::vector<double> out;
         for (const auto& tok : split_csv(raw(key))) out.push_back(parse_double(key, tok));
         return out;
     }
+    /** @brief Same as get_double_list(), but parses each token as an int. */
     std::vector<int> get_int_list(const std::string& key) const {
         std::vector<int> out;
         for (const auto& tok : split_csv(raw(key))) out.push_back(parse_int(key, tok));
         return out;
     }
 
-    // Ordered (key, raw_value) pairs, in file order (first-occurrence
-    // position, last-occurrence value). Used by enumerate_sweeps().
+    /**
+     * @brief All (key, raw_value) pairs, in file order (first-occurrence
+     * position, last-occurrence value). Used by enumerate_sweeps() to find
+     * sweep axes; rarely needed directly.
+     */
     const std::vector<std::pair<std::string, std::string>>& entries() const { return entries_; }
 
     static std::string trim(const std::string& s) {
@@ -163,20 +197,30 @@ private:
     }
 };
 
-// One resolved combination from a parameter sweep: `config` has a single
-// value for every key (ready for get_double()/get_string()/load_params_for),
-// and `suffix` names which combination this is (e.g. "A2_0.5000_A3_0.0000"),
-// or "" if nothing was swept.
+/**
+ * @brief One resolved combination from a parameter sweep (see
+ * enumerate_sweeps()).
+ */
 struct SweepResult {
+    /** A single value for every key -- ready for get_double()/get_string()/load_params_for(). */
     Config config;
+    /** Names this combination, e.g. `"A2_0.5000_A3_0.0000"`, or `""` if nothing was swept. */
     std::string suffix;
 };
 
-// Any key whose value contains a comma becomes a sweep axis (its values
-// tried one at a time), EXCEPT grid_dims/grid_min/grid_max, which are
-// always fixed-length per-dimension vectors rather than sweep lists.
-// Returns the cartesian product of all sweep axes, in the axes' file
-// order -- a single-element vector (suffix "") if nothing is swept.
+/**
+ * @brief Expands a config's comma-separated values into every combination
+ * of a parameter sweep.
+ *
+ * Any key whose value contains a comma becomes a sweep axis (its values
+ * tried one at a time), EXCEPT `grid_dims`/`grid_min`/`grid_max`, which are
+ * always fixed-length per-dimension vectors rather than sweep lists.
+ *
+ * @param cfg The base config, as loaded from a file.
+ * @return The cartesian product of all sweep axes, in the axes' file
+ * order -- a single-element vector (with `suffix == ""`) if nothing in
+ * `cfg` was swept.
+ */
 inline std::vector<SweepResult> enumerate_sweeps(const Config& cfg) {
     static const std::vector<std::string> vector_keys = {"grid_dims", "grid_min", "grid_max"};
 
@@ -220,20 +264,38 @@ inline std::vector<SweepResult> enumerate_sweeps(const Config& cfg) {
     return results;
 }
 
-// The interface a new dynamical system's Params struct must implement to
-// plug into the generic runner (runner.cuh): a full specialization that
-// builds a ParamsType from a resolved (single-value-per-key) Config, e.g.
-//
-//   template <> inline HortonSystemParams load_params_for<HortonSystemParams>(const Config& cfg) {
-//       HortonSystemParams p;
-//       p.A1 = cfg.get_double("A1", 1.0);
-//       ...
-//       return p;
-//   }
-//
-// defined in the system's own header (maps/horton.h). Must be a template
-// specialization (not a plain overload) so the generic runner's dependent
-// call `load_params_for<ParamsType>(cfg)` resolves correctly regardless of
-// header include order.
+/**
+ * @brief The parameter-loading half of the interface a new dynamical
+ * system must implement to plug into the generic runner (see runner.cuh
+ * and TUTORIAL.md).
+ *
+ * A new system's own header must provide a full template *specialization*
+ * of this function for its `ParamsType`, building that struct from a
+ * resolved (single-value-per-key) Config -- typically one `cfg.get_double(
+ * "name", default_value)` call per field:
+ * @code
+ *   template <>
+ *   inline HortonSystemParams load_params_for<HortonSystemParams>(const Config& cfg) {
+ *       HortonSystemParams p;
+ *       p.A1 = cfg.get_double("A1", 1.0);
+ *       // ... one field at a time ...
+ *       return p;
+ *   }
+ * @endcode
+ * (defined in maps/horton.h; see also maps/standard_map.h and
+ * maps/henon_heiles.h for two more worked examples). This lets
+ * `run_ode_generic`/`run_map_generic` build any system's params struct
+ * from a config file without knowing its field names.
+ *
+ * @note Must be a template *specialization*, not a plain overload of the
+ * same name -- the generic runner calls `load_params_for<ParamsType>(cfg)`,
+ * a dependent name resolved via template specialization lookup at the
+ * point of instantiation (not ordinary/ADL lookup), so a same-named
+ * overload in the wrong place would silently not be found.
+ *
+ * @tparam ParamsType The system's parameter struct type (e.g. `HortonSystemParams`).
+ * @param cfg A resolved config (one value per key; see enumerate_sweeps()).
+ * @return A fully-populated `ParamsType`.
+ */
 template <typename ParamsType>
 ParamsType load_params_for(const Config& cfg);
