@@ -1,4 +1,11 @@
 #pragma once
+/**
+ * @file ode_msd.cuh
+ * @brief Mean-squared-displacement and final-displacement solver for
+ * continuous-time systems: calculate_ode_msd_and_displacement(). Normally
+ * called via `calculation = msd` in a config file (see run_ode_generic()
+ * in runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 #include <algorithm>
 #include <cmath>
@@ -25,9 +32,17 @@
 //     h_msd_sample_times_out so callers can save a companion time axis
 //     instead of assuming uniform spacing.
 
-// Generates a sorted, de-duplicated list of step indices in [0, num_steps-1]:
-// step 0, then num_samples-1 points spaced logarithmically up to
-// num_steps-1. Used to keep MSD output size independent of num_steps.
+/**
+ * @brief Picks which step indices to record an MSD sample at: step 0, then
+ * up to `num_samples - 1` more spaced logarithmically up to
+ * `num_steps - 1` (sorted, de-duplicated -- so the returned list can be
+ * shorter than `num_samples + 1` if `num_steps` is small). Keeps MSD
+ * output size independent of `num_steps` for long runs.
+ * @param num_steps Total number of integration steps that will be run.
+ * @param num_samples Target number of log-spaced samples (excluding the
+ * always-included step 0); values below 2 are treated as 2.
+ * @return Sorted, de-duplicated step indices in `[0, num_steps-1]`.
+ */
 inline std::vector<int> generate_log_spaced_steps(int num_steps, int num_samples) {
     std::vector<int> steps;
     if (num_steps <= 0) return steps;
@@ -134,6 +149,35 @@ __global__ void ode_msd_kernel(
 
 
 
+/**
+ * @brief Computes, for every particle: the final total/per-component
+ * displacement from its initial condition, and the ensemble-averaged
+ * mean-squared displacement (MSD) at a set of log-spaced sample times (see
+ * generate_log_spaced_steps()). See this file's top comment for why long
+ * runs are batched (`steps_per_batch`) and why MSD is sampled rather than
+ * recorded every step.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_steps Integration steps.
+ * @param dt Integration step size.
+ * @param h_total_displacement [out] Host array, `num_particles` doubles:
+ * `|final_state - initial_state|`.
+ * @param h_displacements [out] Host array, `num_particles * DIMS` doubles:
+ * `final_state - initial_state`, per component.
+ * @param h_msd_out [out] Resized internally to the actual sample count;
+ * `<Δx²+Δy²>` (averaged over particles) at each sampled step.
+ * @param h_msd_sample_times_out [out] Resized internally to match
+ * `h_msd_out`; the physical time (`step * dt`) of each sample.
+ * @param num_msd_samples Target number of log-spaced MSD samples (default 300).
+ * @param steps_per_batch Steps run per kernel launch (default 20000);
+ * doesn't affect the result, only how the work is time-sliced on the GPU.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_msd_and_displacement(
     const SystemType& system_functor,

@@ -1,4 +1,17 @@
-#pragma once 
+#pragma once
+/**
+ * @file ode_lyapunov.cuh
+ * @brief Maximum Lyapunov exponent solver for continuous-time systems:
+ * calculate_ode_lyapunov_exponent(). Normally called via
+ * `calculation = lyapunov` in a config file (see run_ode_generic() in
+ * runner.cuh) rather than directly.
+ *
+ * @note Unlike ode_escape.cuh/ode_msd.cuh, this solver runs the entire
+ * `num_steps` loop in one kernel launch -- not batched. Fine for the
+ * iteration counts a Lyapunov exponent typically needs to converge, but
+ * see those two files' comments for why a very long run would want
+ * batching (not implemented here; no current driver needs it).
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -23,7 +36,14 @@ __global__ void ode_lyapunov_kernel(
         state[j] = d_initial_conditions[idx * DIMS + j];
     }
 
-    double tangent_vec[DIMS] = {1.0, 0.0}; // Initial tangent vector
+    double tangent_vec[DIMS] = {1.0, 0.0}; // Initial tangent vector (NOTE: this
+        // brace-init only explicitly sets the first 2 components; for DIMS > 2
+        // the rest are zero-initialized, i.e. the initial tangent vector is
+        // (1,0,0,...,0). Still a valid starting direction -- the dominant
+        // Lyapunov exponent's growth rate is what the algorithm converges to
+        // regardless of initial direction, barring the zero-probability case
+        // of starting exactly along an invariant subspace -- just not
+        // obviously "DIMS-aware" to someone skimming this line.
     double jacobian[DIMS * DIMS];
     double sum_of_logs = 0.0;
 
@@ -51,6 +71,24 @@ __global__ void ode_lyapunov_kernel(
 }
 
 
+/**
+ * @brief Computes the maximum Lyapunov exponent for every particle:
+ * integrates the trajectory with RK4 while evolving a tangent vector
+ * through the system's jacobian(), periodically renormalizing and
+ * accumulating `log(norm)` (the standard method).
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface,
+ * including jacobian() (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_steps Integration steps.
+ * @param dt Integration step size.
+ * @param h_lyapunov_exponents [out] Host array, `num_particles` doubles.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_lyapunov_exponent(
     const SystemType& system_functor,

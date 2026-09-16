@@ -1,4 +1,11 @@
 #pragma once
+/**
+ * @file ode_escape.cuh
+ * @brief Escape time/basin solver for continuous-time (RK4-integrated)
+ * systems: calculate_ode_escape(). Normally called via
+ * `calculation = escape` in a config file (see run_ode_generic() in
+ * runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -61,6 +68,28 @@ __global__ void ode_escape_kernel(
     }
 }
 
+/**
+ * @brief Computes escape time and basin for every particle, integrating
+ * with RK4 (rk4_step_t()) until SystemTraits<SystemType>::check_escape()
+ * fires or `max_steps` is reached. See this file's top comment for why
+ * long runs are batched (`steps_per_batch`).
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles (see GridSetup).
+ * @param num_particles Particle count.
+ * @param max_steps Maximum integration steps per particle.
+ * @param dt Integration step size.
+ * @param h_escape_times [out] Host array, `num_particles` doubles: escape
+ * time (`(step+1)*dt`), or `-1.0` if never escaped by `max_steps`.
+ * @param h_escape_basins [out] Host array, `num_particles` doubles: the
+ * basin ID from `check_escape()` (`0` if never escaped).
+ * @param steps_per_batch Steps run per kernel launch (default 20000);
+ * doesn't affect the result, only how the work is time-sliced on the GPU.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_escape( // Renamed for clarity
     const SystemType& system_functor,

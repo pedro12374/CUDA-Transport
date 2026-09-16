@@ -1,4 +1,11 @@
-#pragma once 
+#pragma once
+/**
+ * @file map_escape.cuh
+ * @brief Escape time/basin solver for discrete maps: calculate_escape_time().
+ * The map counterpart to ode_escape.cuh. Normally called via
+ * `calculation = escape` in a config file (see run_map_generic() in
+ * runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -57,6 +64,26 @@ __global__ void escape_time_kernel_generic(
 // =============================================================================
 // == HOST SOLVER FUNCTION for Escape Time
 // =============================================================================
+/**
+ * @brief Computes escape time and basin for every particle, iterating the
+ * map until MapTraits<MapType>::check_escape() fires or `max_iterations`
+ * is reached. Unlike ode_escape.cuh's ODE counterpart, this runs entirely
+ * in one kernel launch (map iterations are far cheaper than RK4 steps, so
+ * no current use case needs batching).
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam MapType A map type implementing the map interface (see maps/standard_map.h).
+ * @tparam ParamsType That map's parameter struct type.
+ * @param map_functor The map functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param max_iterations Maximum map iterations per particle.
+ * @param h_escape_times [out] Host array, `num_particles` doubles: escape
+ * iteration (1-indexed), or `-1.0` if never escaped by `max_iterations`.
+ * @param h_escape_basins [out] Host array, `num_particles` doubles: the
+ * basin ID from `check_escape()` (`0` if never escaped).
+ */
 template <int DIMS, typename MapType, typename ParamsType>
 inline void calculate_escape_time(
     const MapType& map_functor,

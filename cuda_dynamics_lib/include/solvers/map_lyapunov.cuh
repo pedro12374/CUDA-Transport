@@ -1,4 +1,11 @@
-#pragma once 
+#pragma once
+/**
+ * @file map_lyapunov.cuh
+ * @brief Maximum Lyapunov exponent solver for discrete maps:
+ * calculate_lyapunov_exponent(). The map counterpart to ode_lyapunov.cuh.
+ * Normally called via `calculation = lyapunov` in a config file (see
+ * run_map_generic() in runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -78,6 +85,22 @@ __global__ void lyapunov_kernel_generic(
 // =============================================================================
 // == HOST SOLVER FUNCTION for Lyapunov Exponent
 // =============================================================================
+/**
+ * @brief Computes the maximum Lyapunov exponent for every particle:
+ * iterates the map while evolving a tangent vector through the map's
+ * jacobian(), periodically renormalizing and accumulating `log(norm)`.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam MapType A map type implementing the map interface, including
+ * jacobian() (see maps/standard_map.h).
+ * @tparam ParamsType That map's parameter struct type.
+ * @param map_functor The map functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_iterations Map iterations.
+ * @param h_lyapunov_exp [out] Host array, `num_particles` doubles.
+ */
 template <int DIMS, typename MapType, typename ParamsType>
 inline void calculate_lyapunov_exponent(
     const MapType& map_functor,
