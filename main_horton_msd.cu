@@ -5,18 +5,30 @@
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include <cstdlib>
 #include "cuda_dynamics_lib/include/cuda_dynamics.h"
 #include "maps/horton.h"
 
-int main() {
+int main(int argc, char** argv) {
     const int DIMS = 2;
     const double DT = 0.01;
      // Time between snapshots
-    
-    const double FINAL_TIME = 10e4; // Your desired final time
+
+    // Final integration time, in the same units as DT. Defaults to 1e5
+    // (10e4) unless overridden on the command line, e.g.:
+    //   ./horton_msd 1e4
+    double FINAL_TIME = 10e4;
+    if (argc > 1) {
+        FINAL_TIME = std::atof(argv[1]);
+    }
 
     // Calculate the total number of steps automatically
     const int TOTAL_STEPS = static_cast<int>(FINAL_TIME / DT);
+    std::cout << "FINAL_TIME = " << FINAL_TIME << " (TOTAL_STEPS = " << TOTAL_STEPS << ")" << std::endl;
+
+    // Number of log-spaced MSD samples to keep per (A2,A3) pair, instead of
+    // one value per step (which at 1e7 steps would be ~80MB per pair).
+    const int NUM_MSD_SAMPLES = 300;
 
     // --- Define A2 values to simulate ---
     std::vector<double> a2_values = {0.0,0.1, 0.5, 1.0};
@@ -32,6 +44,17 @@ int main() {
     if (fs::exists(output_file)) {
         fs::remove(output_file);
     }
+
+    // The log-spaced sample times are the same for every (A2,A3) pair (same
+    // TOTAL_STEPS/DT/NUM_MSD_SAMPLES), so save them once as a shared axis
+    // instead of duplicating them per dataset.
+    std::vector<int> msd_sample_steps = generate_log_spaced_steps(TOTAL_STEPS, NUM_MSD_SAMPLES);
+    std::vector<double> msd_sample_times(msd_sample_steps.size());
+    for (size_t k = 0; k < msd_sample_steps.size(); ++k) {
+        msd_sample_times[k] = static_cast<double>(msd_sample_steps[k]) * DT;
+    }
+    std::vector<size_t> msd_time_dims = {msd_sample_times.size()};
+    save_to_h5(output_file, "MSD_sample_times", msd_time_dims, msd_sample_times.data());
 
     // --- Main Calculation Loop ---
     for (double a2 : a2_values) {
@@ -49,11 +72,13 @@ int main() {
 
         std::vector<double> h_total_displacement(grid.num_particles);
             std::vector<double> h_displacements(grid.num_particles * DIMS);
-            std::vector<double> h_msd(TOTAL_STEPS);
+            std::vector<double> h_msd;
+            std::vector<double> h_msd_sample_times; // same for every pair; already saved once above
 
             calculate_ode_msd_and_displacement<DIMS, HortonSystem, HortonSystemParams>(
                 system, params, grid.h_initial_conditions.data(), grid.num_particles,
-                TOTAL_STEPS, DT, h_total_displacement.data(), h_displacements.data(), h_msd.data());
+                TOTAL_STEPS, DT, h_total_displacement.data(), h_displacements.data(),
+                h_msd, h_msd_sample_times, NUM_MSD_SAMPLES);
 
             // --- Create unique dataset names ---
             std::stringstream base_dset_name;
@@ -67,8 +92,8 @@ int main() {
 
             // --- Save All Data ---
             std::vector<size_t> grid_dims_2d = {(size_t)grid.grid_res[0], (size_t)grid.grid_res[1]};
-            std::vector<size_t> msd_dims_1d = {(size_t)TOTAL_STEPS};
-            
+            std::vector<size_t> msd_dims_1d = {h_msd.size()};
+
             save_to_h5(output_file, msd_dset_name, msd_dims_1d, h_msd.data());
             save_displacement_components(output_file, disp_dset_name, grid, h_displacements.data());
 

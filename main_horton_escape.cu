@@ -5,19 +5,26 @@
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include <cstdlib>
 #include "cuda_dynamics_lib/include/cuda_dynamics.h"
 #include "maps/horton.h"
 
-int main() {
+int main(int argc, char** argv) {
     const int DIMS = 2;
     const double DT = 0.01;
      // Time between snapshots
-    
-    const double FINAL_TIME = 10e4; // Your desired final time
+
+    // Final integration time, in the same units as DT. Defaults to 1e5
+    // (10e4) unless overridden on the command line, e.g.:
+    //   ./horton_escape 1e4
+    double FINAL_TIME = 10e4;
+    if (argc > 1) {
+        FINAL_TIME = std::atof(argv[1]);
+    }
 
     // Calculate the total number of steps automatically
     const int TOTAL_STEPS = static_cast<int>(FINAL_TIME / DT);
-    
+    std::cout << "FINAL_TIME = " << FINAL_TIME << " (TOTAL_STEPS = " << TOTAL_STEPS << ")" << std::endl;
 
     // --- Define A2 values to simulate ---
     std::vector<double> a2_values = {0.0,0.1, 0.5, 1.0};
