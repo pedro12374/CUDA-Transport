@@ -290,6 +290,32 @@ alongside). `mkdir build && cd build && cmake .. && make -j && ctest`.
   output), not just that it compiles.
 - `build/` is gitignored; out-of-source only.
 
+## Phase 4: Python plotting-script consolidation
+
+Surveyed the whole repo for the README's "consolidate old plotting scripts"
+item. No `Plot_Thesis_*.py` files remained -- that part was already done
+before this was picked up. Found and fixed two smaller things instead
+(with the user's sign-off on both, since neither was obviously safe to
+just do):
+- `Presentation/parana_theme.py` was byte-identical to `Py/parana_theme.py`
+  -- deleted, `Presentation/plt.py` now imports the canonical copy via a
+  relative `sys.path.insert(..., "../Py")`.
+- `Presentation/plt.py` was actually broken, not just duplicated: it read
+  `dat/PS_Zoom.h5` (`K_%.6f` datasets), produced only by `main_PS.cu.bkp`,
+  which was deleted in Phase 1. Restored via
+  `configs/standard_map_phasespace_zoom.cfg`, reproducing that `.bkp`
+  driver's exact parameters (10x10 grid zoomed into p in [0,0.2], theta in
+  [0,0.5], 10000 iterations, same K values) through the current generic
+  pipeline; `plt.py` updated to read the generic runner's
+  `PhaseSpace_K_%.4f` naming (not the old driver's `%.6f`). Verified by
+  actually running both the C++ side and the updated `plt.py` end-to-end
+  and inspecting the resulting plot -- real KAM islands and chaotic-sea
+  structure, not a blank/garbled image.
+
+`Py/Quant.jl` (stale, reads the old `.bkp` Standard-Map-escape output
+format -- see the "Basin quantifiers" section above) was **not** touched
+here; still flagged, still the user's call.
+
 ## Basin quantifiers (Py/basin_metrics.py)
 
 Per the user's request (2026-09-16): added basin entropy, basin boundary

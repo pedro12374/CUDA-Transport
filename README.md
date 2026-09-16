@@ -50,4 +50,5 @@ Ensure that the results are always correct and the code is reliable.
 Finalize the code structure and add new functionality.
 
 - [x] **Finalize the "Header-Only" Refactor:** Ensure all solvers (`map_escape`, `map_lyapunov`, etc.) have been moved to their own `.cuh` files and that the old library `.cu` files have been removed.
-- [ ] **Unify Python Plotting Scripts:** Consolidate all old `Plot_Thesis_*.py` scripts into the new structure with `plotting_lib.py` and `run_plots.py` to avoid code duplication.
+- [x] **Unify Python Plotting Scripts:** Consolidate all old `Plot_Thesis_*.py` scripts into the new structure with `plotting_lib.py` and `run_plots.py` to avoid code duplication.
+    - No `Plot_Thesis_*.py` files remained by the time this was picked up. Found and fixed instead: `Presentation/parana_theme.py` was a byte-identical duplicate of `Py/parana_theme.py` (removed, `Presentation/plt.py` now imports the canonical copy), and `Presentation/plt.py` itself was reading a file (`PS_Zoom.h5`) no driver produces anymore (its source, `main_PS.cu.bkp`, was removed earlier) -- restored via `configs/standard_map_phasespace_zoom.cfg` against the current generic pipeline.
