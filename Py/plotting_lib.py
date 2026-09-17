@@ -2,9 +2,9 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, TwoSlopeNorm, BoundaryNorm, ListedColormap
-from scipy.optimize import curve_fit
 
 import parana_theme as tema
+from basin_metrics import fit_diffusion_exponent
 
 tema.aplicar_tema()
 
@@ -67,21 +67,22 @@ def _plot_stroboscopic(ax, data, title, bounds):
     ax.set_ylim(bounds[2], bounds[3]) # Use bounds for y-axis
     ax.set_aspect('equal', adjustable='box')
     return None, None
-def _plot_msd(ax, data, title, bounds=None): # bounds is unused but keeps signature consistent
-    """Internal function to plot MSD data on a log-log scale."""
-    t = np.arange(len(data)) * 0.01 # Assuming DT=0.01 from main.cu
-    # Power-law model for fitting: MSD = D * t^alpha
-    def power_law(t, D, alpha):
-        return D * (t**alpha)
+def _plot_msd(ax, data, title, t, bounds=None): # bounds is unused but keeps signature consistent
+    """Internal function to plot MSD data on a log-log scale.
 
-    # Fit the data (ignoring the first few points)
+    `t` is the physical time of each sample (read from the 'MSD_sample_times'
+    dataset the C++ driver saves alongside each MSD_* dataset) -- the samples
+    are logarithmically spaced, not one-per-timestep, so this can't be
+    reconstructed from len(data) and a fixed dt.
+    """
+    # Fit MSD(t) = D * t^alpha (ignoring the first few points); see
+    # basin_metrics.fit_diffusion_exponent for the fit itself.
     fit_start = 1
     if len(t) > fit_start:
-        popt, _ = curve_fit(power_law, t[fit_start:], data[fit_start:])
-        alpha = popt[1]
+        D, alpha, _D_err, _alpha_err = fit_diffusion_exponent(t, data, fit_start=fit_start)
         fit_label = f'$\\alpha \\approx {alpha:.2f}$'
-        ax.plot(t[fit_start:], power_law(t[fit_start:], *popt), 'r--', label=fit_label)
-    
+        ax.plot(t[fit_start:], D * (t[fit_start:] ** alpha), 'r--', label=fit_label)
+
     ax.loglog(t, data)
     ax.set_title(title)
     ax.set_xlabel("Time (t)")
@@ -109,6 +110,48 @@ def _plot_total_displacement(ax, data, title, bounds):
                    extent=bounds,aspect='auto')
     ax.set_title(title)
     return im, r"Total Displacement Magnitude $\sqrt{\Delta x^2 + \Delta y^2}$"
+
+def _add_colorbar(fig, im, ax_target, cbar_label, **kwargs):
+    """
+    Adds a colorbar for `im`, handling both cbar_label shapes the _plot_*
+    helpers return: a plain string (most plot types), or a
+    {"label":..., "ticks":...} dict (_plot_escape_basin) for a
+    discrete/ticked colorbar. Without this, the dict was previously passed
+    straight through as `label=`, so a basin plot's colorbar showed the
+    dict's repr as its label instead of "Escape Basin" with the [-1,0,1] ticks.
+    """
+    if isinstance(cbar_label, dict):
+        cbar = fig.colorbar(im, ax=ax_target, label=cbar_label.get("label"), **kwargs)
+        ticks = cbar_label.get("ticks")
+        if ticks is not None:
+            cbar.set_ticks(ticks)
+    else:
+        fig.colorbar(im, ax=ax_target, label=cbar_label, **kwargs)
+
+
+def _read_msd_sample_times(f, data, dset_name=None):
+    """
+    Reads the companion sample-times dataset an ODE system's calculation=msd
+    run saves (see runner.cuh's run_ode_generic) -- but a discrete-map
+    system's calculation=msd run (run_map_generic) writes a dense,
+    one-sample-per-iteration MSD with no such dataset (see ode_msd.cuh/
+    map_msd.cuh's docs for why the two calculation types differ). Falls
+    back to treating each sample as one iteration (np.arange) in that case,
+    instead of a bare KeyError.
+
+    Usually a single 'MSD_sample_times' is shared across every sweep
+    combination in the file, but if a combination's final_time/msd_samples
+    differs from the rest (an unusual, if legal, thing to sweep), the C++
+    side saves that combination its own 'MSD_sample_times_<suffix>' instead
+    (see run_ode_generic's msd branch) -- prefer that one when it exists.
+    """
+    if dset_name and dset_name.startswith("MSD_"):
+        per_combo_name = "MSD_sample_times_" + dset_name[len("MSD_"):]
+        if per_combo_name in f:
+            return f[per_combo_name][:]
+    if "MSD_sample_times" in f:
+        return f["MSD_sample_times"][:]
+    return np.arange(len(data))
 
 # ==============================================================================
 # == PUBLIC MASTER FUNCTION
@@ -141,11 +184,14 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
     for i, p_val in enumerate(params_list):
         if i >= len(axs): break
         ax = axs[i]
-        dset_name = f"{dset_prefix}_{p_val:.2f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.6f}"
-        
+        # .4f matches the C++ generic runner's sweep-suffix precision --
+        # see enumerate_sweeps() in cuda_dynamics_lib/include/config.h
+        dset_name = f"{dset_prefix}_{p_val:.4f}"
+
         try:
             with h5py.File(h5_file, 'r') as f:
                 data = f[dset_name][:]
+                msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
             title = f"{dset_prefix.split('_')[-1]} = {p_val}"
             
@@ -161,7 +207,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
             elif plot_type == 'total_displacement': 
                 im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
             elif plot_type == 'msd':
-                im, cbar_label = _plot_msd(ax, data, title, bounds)
+                im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
             elif plot_type == 'basin':
                 # Pass the new config to the internal function
                 im, cbar_label = _plot_escape_basin(ax, data, title, bounds, basin_cmap_config)
@@ -182,7 +228,7 @@ def generate_mosaic_plot(h5_file, output_pdf, plot_type, dset_prefix, params_lis
 
     # --- Final Touches ---
     if im is not None:
-        fig.colorbar(im, ax=axs.tolist(), location='right', shrink=0.6, label=cbar_label)
+        _add_colorbar(fig, im, axs.tolist(), cbar_label, location='right', shrink=0.6)
 
     plt.savefig(output_pdf, format='pdf', bbox_inches='tight')
     print(f"✅ Plot successfully saved to: {output_pdf}")
@@ -211,12 +257,19 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
         for j, c_val in enumerate(col_params):
             ax = axs[i, j]
             
-            # Construct the dataset name based on the C++ format
-            dset_name = f"{dset_prefix}_{col_prefix}_{c_val:.2f}_{row_prefix}_{r_val:.2f}"
-            
+            # Construct the dataset name based on the C++ format (.4f matches
+            # enumerate_sweeps()'s sweep-suffix precision in config.h)
+            dset_name = f"{dset_prefix}_{col_prefix}_{c_val:.4f}_{row_prefix}_{r_val:.4f}"
+
+            # title was previously referenced below (as `title` in 6 branches,
+            # `plot_title` in the 'basin' branch) without ever being defined
+            # anywhere in this function -- every plot_type raised NameError.
+            title = f"{col_prefix}={c_val}, {row_prefix}={r_val}"
+
             try:
                 with h5py.File(h5_file, 'r') as f:
                     data = f[dset_name][:]
+                    msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
                 # Call the appropriate internal plotting function
                 if plot_type == 'escape':
@@ -227,13 +280,13 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
                     im, cbar_label = _plot_stroboscopic(ax, data, title, bounds)
                 elif plot_type == 'displacement':
                     im, cbar_label = _plot_displacement(ax, data, title, bounds)
-                elif plot_type == 'total_displacement': 
+                elif plot_type == 'total_displacement':
                     im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
                 elif plot_type == 'msd':
-                    im, cbar_label = _plot_msd(ax, data, title, bounds)
+                    im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
                 elif plot_type == 'basin':
              # Pass the new config to the internal function
-                    im, cbar_label = _plot_escape_basin(ax, data, plot_title, bounds, basin_cmap_config)
+                    im, cbar_label = _plot_escape_basin(ax, data, title, bounds, basin_cmap_config)
                 # Add other plot types here if needed
                 else:
                     print(f"Error: Unknown plot type '{plot_type}'.")
@@ -252,7 +305,7 @@ def generate_parameter_matrix_plot(h5_file, output_pdf, plot_type, dset_prefix, 
 
     # --- Final Touches ---
     if im is not None:
-        fig.colorbar(im, ax=axs, location='right', aspect=40, shrink=0.8, label=cbar_label)
+        _add_colorbar(fig, im, axs, cbar_label, location='right', aspect=40, shrink=0.8)
 
     fig.supxlabel('X')
     fig.supylabel('Y')
@@ -279,6 +332,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     try:
         with h5py.File(h5_file, 'r') as f:
             data = f[dset_name][:]
+            msd_t = _read_msd_sample_times(f, data, dset_name) if plot_type == 'msd' else None
 
         plot_title = title if title else dset_name
         
@@ -294,7 +348,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
         elif plot_type == 'total_displacement': 
             im, cbar_label = _plot_total_displacement(ax, data, title, bounds)
         elif plot_type == 'msd':
-            im, cbar_label = _plot_msd(ax, data, title, bounds)
+            im, cbar_label = _plot_msd(ax, data, title, msd_t, bounds)
         elif plot_type == 'basin':
              # Pass the new config to the internal function
             im, cbar_label = _plot_escape_basin(ax, data, plot_title, bounds, basin_cmap_config)
@@ -313,7 +367,7 @@ def generate_single_plot(h5_file, output_pdf, plot_type, dset_name, title=None, 
     ax.set_xlabel('X')
 
     if im is not None:
-        fig.colorbar(im, ax=ax, location='right', shrink=0.8, label=cbar_label)
+        _add_colorbar(fig, im, ax, cbar_label, location='right', shrink=0.8)
 
     plt.savefig(output_pdf, format='pdf', bbox_inches='tight')
     print(f"✅ Plot successfully saved to: {output_pdf}")
@@ -327,8 +381,10 @@ def generate_individual_plots(h5_file, output_dir, plot_type, dset_prefix, param
     
     for p_val in params_list:
         # 1. Construct the specific dataset name for this parameter
-        dset_name = f"{dset_prefix}_{p_val:.2f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.6f}"
-        
+        # (.4f matches the C++ generic runner's sweep-suffix precision --
+        # see enumerate_sweeps() in cuda_dynamics_lib/include/config.h)
+        dset_name = f"{dset_prefix}_{p_val:.4f}" if isinstance(p_val, float) else f"{dset_prefix}_{p_val:.4f}"
+
         # 2. Create a unique, descriptive output filename for this plot
         output_pdf = f"{output_dir}/{plot_type}_{dset_name}.pdf"
         

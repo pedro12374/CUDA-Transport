@@ -1,0 +1,36 @@
+# Minimal Doxygen config for CUDA-Transport's public headers.
+# Usage: doxygen Doxyfile   (from the repo root; output in docs/html/index.html)
+#
+# NOTE: doxygen isn't installed on the server this was written on, so this
+# file's syntax was checked by hand against the Doxygen manual, not by
+# actually running `doxygen` -- if something looks off, `doxygen -g` from a
+# machine that has it will regenerate a full (much longer) default config
+# you can diff this against.
+
+PROJECT_NAME           = "CUDA-Transport"
+PROJECT_BRIEF          = "Generic CUDA library for transport and chaos analysis of dynamical systems"
+OUTPUT_DIRECTORY       = docs
+
+# Only the public interface -- library headers, system definitions, and the
+# top-level entry points -- not tests/ or third-party code.
+INPUT                   = cuda_dynamics_lib/include maps run_horton.cu run_standard_map.cu run_henon_heiles.cu README.md
+RECURSIVE               = YES
+FILE_PATTERNS           = *.h *.cuh *.cu *.md
+USE_MDFILE_AS_MAINPAGE  = README.md
+
+# .cu/.cuh aren't recognized as C++ by default.
+EXTENSION_MAPPING       = cu=C++ cuh=C++
+
+EXTRACT_ALL             = YES
+EXTRACT_STATIC          = YES
+RECURSIVE               = YES
+SOURCE_BROWSER          = YES
+
+GENERATE_HTML           = YES
+GENERATE_LATEX          = NO
+
+# __host__/__device__/__global__ aren't real C++ to a plain parser.
+PREDEFINED              = __host__= __device__= __global__= __forceinline__=inline
+
+QUIET                   = YES
+WARN_IF_UNDOCUMENTED    = YES

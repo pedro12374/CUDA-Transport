@@ -1,4 +1,17 @@
-#pragma once 
+#pragma once
+/**
+ * @file ode_lyapunov.cuh
+ * @brief Maximum Lyapunov exponent solver for continuous-time systems:
+ * calculate_ode_lyapunov_exponent(). Normally called via
+ * `calculation = lyapunov` in a config file (see run_ode_generic() in
+ * runner.cuh) rather than directly.
+ *
+ * @note Unlike ode_escape.cuh/ode_msd.cuh, this solver runs the entire
+ * `num_steps` loop in one kernel launch -- not batched. Fine for the
+ * iteration counts a Lyapunov exponent typically needs to converge, but
+ * see those two files' comments for why a very long run would want
+ * batching (not implemented here; no current driver needs it).
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -15,7 +28,7 @@ __global__ void ode_lyapunov_kernel(
     const double* d_initial_conditions,
     double* d_lyapunov_exp)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     double state[DIMS];
@@ -23,7 +36,23 @@ __global__ void ode_lyapunov_kernel(
         state[j] = d_initial_conditions[idx * DIMS + j];
     }
 
-    double tangent_vec[DIMS] = {1.0, 0.0}; // Initial tangent vector
+    // Initial tangent vector: all-ones (normalized below), not a coordinate
+    // basis vector like (1,0,...,0). The starting direction doesn't affect
+    // the converged Lyapunov exponent for a generic trajectory -- except
+    // when it lies exactly in an invariant subspace of the linearized
+    // dynamics, which a basis vector can: e.g. Henon-Heiles' Jacobian
+    // decouples into an (x,px) block and a (y,py) block whenever a
+    // trajectory sits on the x=px=0 symmetric orbit (a common initial
+    // condition, e.g. y-py Poincare-section grids), so (1,0,0,0) would stay
+    // confined to the (x,px) block forever. For Henon-Heiles specifically
+    // that block happens to carry the equal-or-larger exponent (the (y,py)
+    // block alone is a bound 1-DOF system, always exactly integrable, so
+    // its own confined exponent is 0), so this didn't produce a
+    // demonstrably wrong answer there -- but relying on that coincidence
+    // isn't sound for other systems/symmetries, so this is fixed generally.
+    double tangent_vec[DIMS];
+    for (int j = 0; j < DIMS; ++j) tangent_vec[j] = 1.0;
+    normalize_vector<DIMS>(tangent_vec, vector_norm<DIMS>(tangent_vec));
     double jacobian[DIMS * DIMS];
     double sum_of_logs = 0.0;
 
@@ -51,6 +80,24 @@ __global__ void ode_lyapunov_kernel(
 }
 
 
+/**
+ * @brief Computes the maximum Lyapunov exponent for every particle:
+ * integrates the trajectory with RK4 while evolving a tangent vector
+ * through the system's jacobian(), periodically renormalizing and
+ * accumulating `log(norm)` (the standard method).
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface,
+ * including jacobian() (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_steps Integration steps.
+ * @param dt Integration step size.
+ * @param h_lyapunov_exponents [out] Host array, `num_particles` doubles.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_lyapunov_exponent(
     const SystemType& system_functor,

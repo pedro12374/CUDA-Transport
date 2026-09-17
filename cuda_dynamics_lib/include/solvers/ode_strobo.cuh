@@ -1,4 +1,13 @@
-#pragma once 
+#pragma once
+/**
+ * @file ode_strobo.cuh
+ * @brief Stroboscopic map solver for continuous-time systems -- samples
+ * each trajectory at fixed intervals `tau` rather than every dt, the
+ * standard way to turn a periodically- (or quasi-periodically-) forced
+ * flow into a Poincare-section-like map: calculate_ode_stroboscopic_map().
+ * Normally called via `calculation = stroboscopic` in a config file (see
+ * run_ode_generic() in runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 
 // =============================================================================
@@ -19,6 +28,19 @@ __device__ void integrate_for_tau_device(
         double current_t = start_time + static_cast<double>(i) * dt;
         rk4_step_t<DIMS, SystemType, ParamsType>(state, current_t, dt, system, params);
     }
+
+    // tau isn't generally an exact multiple of dt, so the loop above lands
+    // short of tau by a remainder in [0, dt). Take one final partial-dt
+    // step to land exactly on tau -- otherwise each interval's state would
+    // silently fall further and further behind the nominal p*tau clock
+    // used to seed the next interval, desyncing the time-dependent forcing
+    // terms from the true integrated time.
+    double elapsed = static_cast<double>(num_steps) * dt;
+    double remaining = tau - elapsed;
+    if (remaining > 1e-12 * dt) {
+        double current_t = start_time + elapsed;
+        rk4_step_t<DIMS, SystemType, ParamsType>(state, current_t, remaining, system, params);
+    }
 }
 
 
@@ -33,7 +55,7 @@ __global__ void ode_stroboscopic_kernel(
     const double* d_initial_conditions,
     double* d_stroboscopic_map_out) // Output array
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     double state[DIMS];
@@ -57,6 +79,25 @@ __global__ void ode_stroboscopic_kernel(
 }
 
 
+/**
+ * @brief Records each particle's state every `tau` time units (not every
+ * `dt`), for `num_points` intervals -- a stroboscopic/Poincare-section-like
+ * map of a continuous-time trajectory.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_points Number of stroboscopic samples to record per particle.
+ * @param tau Time interval between samples.
+ * @param dt Integration step size (need not divide `tau` evenly; see
+ * integrate_for_tau_device()).
+ * @param h_stroboscopic_map_out [out] Host array, `num_particles *
+ * num_points * DIMS` doubles, layout `(particle, sample, dimension)`.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_stroboscopic_map(
     const SystemType& system_functor,
@@ -81,6 +122,7 @@ inline void calculate_ode_stroboscopic_map(
     ode_stroboscopic_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
         system_functor, params, num_points, tau, dt, num_particles, d_init_cond, d_strobo_map);
 
+    CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(h_stroboscopic_map_out, d_strobo_map, map_size, cudaMemcpyDeviceToHost));
 

@@ -1,4 +1,14 @@
-#pragma once 
+#pragma once
+/**
+ * @file map_msd.cuh
+ * @brief Mean-squared-displacement and final-displacement solver for
+ * discrete maps: calculate_msd_and_displacement(). The map counterpart to
+ * ode_msd.cuh -- but unlike it, records one MSD sample per iteration (not
+ * log-spaced) and runs in a single kernel launch (not batched); fine at
+ * the iteration counts map calculations typically need. Normally called
+ * via `calculation = msd` in a config file (see run_map_generic() in
+ * runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
 
 template <int DIMS, typename MapType, typename ParamsType>
@@ -56,6 +66,27 @@ __global__ void msd_kernel_generic(
     }
 }
 
+/**
+ * @brief Computes, for every particle: the final total/per-component
+ * displacement from its initial condition, and the ensemble-averaged
+ * mean-squared displacement (MSD) at every iteration (dense, not
+ * log-spaced -- see this file's top comment).
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam MapType A map type implementing the map interface (see maps/standard_map.h).
+ * @tparam ParamsType That map's parameter struct type.
+ * @param map_functor The map functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param min_bounds,max_bounds Unused by this solver (`nullptr` is fine);
+ * kept in the signature for backward compatibility with an older caller
+ * that no longer exists in this repo.
+ * @param num_particles Particle count.
+ * @param num_iterations Map iterations.
+ * @param h_total_displacement [out] Host array, `num_particles` doubles.
+ * @param h_displacements [out] Host array, `num_particles * DIMS` doubles.
+ * @param h_msd [out] Host array, `num_iterations` doubles (one MSD sample per iteration).
+ */
 template <int DIMS, typename MapType, typename ParamsType>
 inline void calculate_msd_and_displacement(
     const MapType& map_functor,

@@ -1,45 +1,125 @@
-#pragma once 
+#pragma once
+/**
+ * @file ode_msd.cuh
+ * @brief Mean-squared-displacement and final-displacement solver for
+ * continuous-time systems: calculate_ode_msd_and_displacement(). Normally
+ * called via `calculation = msd` in a config file (see run_ode_generic()
+ * in runner.cuh) rather than directly.
+ */
 #include "../cuda_dynamics.h"
+#include <algorithm>
+#include <cmath>
 
 // =============================================================================
 // == ODE MSD Solver Implementation
 // =============================================================================
+//
+// Two changes from a naive "one big kernel launch, one MSD sample per step"
+// implementation:
+//
+//  1. Batching: num_steps can be ~1e7, which at ~1e6 particles is ~1e13
+//     sequential RK4 evaluations. As with the escape solver, that's split
+//     into repeated kernel launches of `steps_per_batch` steps each, with
+//     each particle's wrapped/unwrapped state persisted in device memory
+//     between launches so the physics is unaffected -- same operations,
+//     same order, just resumable and GPU-time-sliced.
+//
+//  2. Log-spaced MSD sampling: recording one double per step at 1e7 steps
+//     is ~80MB per (A2,A3) pair. generate_log_spaced_steps() picks a much
+//     smaller set of step indices (step 0, then logarithmically spaced up
+//     to num_steps-1) and only those are recorded, without changing the
+//     integration itself. The corresponding physical times are returned in
+//     h_msd_sample_times_out so callers can save a companion time axis
+//     instead of assuming uniform spacing.
+
+/**
+ * @brief Picks which step indices to record an MSD sample at: step 0, then
+ * up to `num_samples - 1` more spaced logarithmically up to
+ * `num_steps - 1` (sorted, de-duplicated -- so the returned list can be
+ * shorter than `num_samples + 1` if `num_steps` is small). Keeps MSD
+ * output size independent of `num_steps` for long runs.
+ * @param num_steps Total number of integration steps that will be run.
+ * @param num_samples Target number of log-spaced samples (excluding the
+ * always-included step 0); values below 2 are treated as 2.
+ * @return Sorted, de-duplicated step indices in `[0, num_steps-1]`.
+ */
+inline std::vector<int> generate_log_spaced_steps(int num_steps, int num_samples) {
+    std::vector<int> steps;
+    if (num_steps <= 0) return steps;
+    steps.push_back(0);
+    int last_step = num_steps - 1;
+    if (last_step < 1) return steps;
+    if (num_samples < 2) num_samples = 2;
+
+    double log_last = std::log(static_cast<double>(last_step));
+    for (int k = 0; k < num_samples; ++k) {
+        double frac = static_cast<double>(k) / static_cast<double>(num_samples - 1);
+        int step = static_cast<int>(std::round(std::exp(frac * log_last)));
+        step = std::min(std::max(step, 1), last_step);
+        steps.push_back(step);
+    }
+    std::sort(steps.begin(), steps.end());
+    steps.erase(std::unique(steps.begin(), steps.end()), steps.end());
+    return steps;
+}
 
 template <int DIMS, typename SystemType, typename ParamsType>
 __global__ void ode_msd_kernel(
     SystemType system,
     ParamsType params,
-    int num_steps,
+    int step_offset,      // global step index this batch starts at
+    int steps_this_batch, // number of steps to run in this launch
     double dt,
     long long num_particles,
     const double* d_initial_conditions,
+    const int* d_sample_steps, // sorted global step indices to record MSD at
+    int num_samples,
+    int sample_start_idx, // index into d_sample_steps this batch starts at
+    double* d_state_wrapped,   // persistent per-particle state across batches
+    double* d_state_unwrapped,
     double* d_total_displacement,
     double* d_displacements,
     double* d_msd)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    long long idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_particles) return;
 
     // --- State variables ---
+    double initial_state[DIMS];   // For calculating displacement
     double state_wrapped[DIMS];   // Input for the physics (RK4)
     double state_unwrapped[DIMS]; // "True" position for measurements
-    double initial_state[DIMS];   // For calculating displacement
 
     for (int j = 0; j < DIMS; ++j) {
         initial_state[j] = d_initial_conditions[idx * DIMS + j];
-        state_wrapped[j] = initial_state[j];
-        state_unwrapped[j] = initial_state[j];
+        state_wrapped[j] = d_state_wrapped[idx * DIMS + j];
+        state_unwrapped[j] = d_state_unwrapped[idx * DIMS + j];
     }
 
-    for (int step = 0; step < num_steps; ++step) {
-        double t = static_cast<double>(step) * dt;
+    int sample_idx = sample_start_idx;
+    for (int local_step = 0; local_step < steps_this_batch; ++local_step) {
+        int global_step = step_offset + local_step;
+        double t = static_cast<double>(global_step) * dt;
 
-        // --- 1. Calculate MSD for BOTH directions at the start of the step ---
-        // This uses the "true" unwrapped trajectory.
-        double dx = state_unwrapped[0] - initial_state[0];
-        double dy = state_unwrapped[1] - initial_state[1];
-        atomicAdd(&d_msd[step], dx * dx + dy * dy);
-
+        // --- 1. Record MSD only at the chosen log-spaced sample steps ---
+        // This uses the "true" unwrapped trajectory, measured at the start
+        // of the step (matches the original one-sample-per-step behavior).
+        // MSD is a position-space transport diagnostic, summed over the
+        // first min(DIMS,2) state components -- every system in this
+        // library lists position coordinates first (e.g. Henon-Heiles'
+        // (x,y,px,py): x,y are position, px,py momentum, intentionally
+        // excluded here -- summing squared momentum differences into a
+        // "mean squared displacement" would be physically meaningless).
+        // DIMS==2 systems (Horton, Pendulum) are unaffected: "first 2" is
+        // "all of it" for them, so this is the same value as before.
+        if (sample_idx < num_samples && d_sample_steps[sample_idx] == global_step) {
+            double sq_disp = 0.0;
+            for (int j = 0; j < DIMS && j < 2; ++j) {
+                double dj = state_unwrapped[j] - initial_state[j];
+                sq_disp += dj * dj;
+            }
+            atomicAdd(&d_msd[sample_idx], sq_disp);
+            ++sample_idx;
+        }
 
         double state_old_wrapped[DIMS];
         for (int j = 0; j < DIMS; ++j) {
@@ -49,7 +129,7 @@ __global__ void ode_msd_kernel(
         // The integrator takes the WRAPPED state as input and updates it
         // in-place to the next UNWRAPPED position.
         rk4_step_t<DIMS, SystemType, ParamsType>(state_wrapped, t, dt, system, params);
-        
+
         for (int j = 0; j < DIMS; ++j) {
             double step_displacement = state_wrapped[j] - state_old_wrapped[j];
             state_unwrapped[j] += step_displacement;
@@ -58,22 +138,71 @@ __global__ void ode_msd_kernel(
         // --- 3. Update the unwrapped state ---
         // The result of the integration IS the new unwrapped state.
 
-
         // --- 4. Create the new wrapped state for the NEXT iteration's physics ---
         // The SystemTraits function now applies periodicity ONLY to the wrapped state.
         SystemTraits<SystemType>::post_step_update(state_wrapped);
     }
-    
-    // --- Final Displacement (calculated from the final unwrapped state) ---
-    double final_dx = state_unwrapped[0] - initial_state[0];
-    double final_dy = state_unwrapped[1] - initial_state[1];
-    d_displacements[idx * DIMS + 0] = final_dx;
-    d_displacements[idx * DIMS + 1] = final_dy;
-    d_total_displacement[idx] = sqrt(final_dx * final_dx + final_dy * final_dy);
+
+    // Persist state for the next launch.
+    for (int j = 0; j < DIMS; ++j) {
+        d_state_wrapped[idx * DIMS + j] = state_wrapped[j];
+        d_state_unwrapped[idx * DIMS + j] = state_unwrapped[j];
+    }
+
+    // --- Final Displacement (recomputed every batch; only the last launch's
+    //     write matters, and it's idempotent so that's harmless) ---
+    // d_displacements gets every component (position AND momentum, for a
+    // system like Henon-Heiles) -- unlike MSD above, there's no physical
+    // ambiguity here, it's just "how much did each coordinate change".
+    // d_total_displacement stays position-space-only (first min(DIMS,2)
+    // components), for the same reason as the MSD accumulator above.
+    double total_sq_disp = 0.0;
+    for (int j = 0; j < DIMS; ++j) {
+        double disp_j = state_unwrapped[j] - initial_state[j];
+        d_displacements[idx * DIMS + j] = disp_j;
+        if (j < 2) total_sq_disp += disp_j * disp_j;
+    }
+    d_total_displacement[idx] = sqrt(total_sq_disp);
 }
 
 
 
+/**
+ * @brief Computes, for every particle: the final total/per-component
+ * displacement from its initial condition, and the ensemble-averaged
+ * mean-squared displacement (MSD) at a set of log-spaced sample times (see
+ * generate_log_spaced_steps()). See this file's top comment for why long
+ * runs are batched (`steps_per_batch`) and why MSD is sampled rather than
+ * recorded every step.
+ *
+ * @tparam DIMS State dimensionality.
+ * @tparam SystemType A system type implementing the ODE interface (see maps/horton.h).
+ * @tparam ParamsType That system's parameter struct type.
+ * @param system_functor The system functor.
+ * @param params Physical parameters.
+ * @param h_initial_conditions Host array, `num_particles * DIMS` doubles.
+ * @param num_particles Particle count.
+ * @param num_steps Integration steps.
+ * @param dt Integration step size.
+ * @param h_total_displacement [out] Host array, `num_particles` doubles:
+ * position-space `|final_state - initial_state|`, i.e. summed over only the
+ * first `min(DIMS,2)` state components (every system in this library lists
+ * position coordinates first; for a system with extra non-position
+ * components, e.g. Henon-Heiles' momenta, those are intentionally excluded
+ * here -- see this file's implementation comment for why).
+ * @param h_displacements [out] Host array, `num_particles * DIMS` doubles:
+ * `final_state - initial_state`, per component -- every component, position
+ * and otherwise (unlike h_total_displacement/h_msd_out, there's no
+ * position-space-only restriction here).
+ * @param h_msd_out [out] Resized internally to the actual sample count;
+ * position-space `<Δx²+Δy²>` (averaged over particles) at each sampled step
+ * -- same first-`min(DIMS,2)`-components convention as h_total_displacement.
+ * @param h_msd_sample_times_out [out] Resized internally to match
+ * `h_msd_out`; the physical time (`step * dt`) of each sample.
+ * @param num_msd_samples Target number of log-spaced MSD samples (default 300).
+ * @param steps_per_batch Steps run per kernel launch (default 20000);
+ * doesn't affect the result, only how the work is time-sliced on the GPU.
+ */
 template <int DIMS, typename SystemType, typename ParamsType>
 inline void calculate_ode_msd_and_displacement(
     const SystemType& system_functor,
@@ -84,39 +213,66 @@ inline void calculate_ode_msd_and_displacement(
     double dt,
     double* h_total_displacement,
     double* h_displacements,
-    double* h_msd)
+    std::vector<double>& h_msd_out,             // resized to the actual sample count
+    std::vector<double>& h_msd_sample_times_out, // physical times for each h_msd_out entry
+    int num_msd_samples = 300,
+    int steps_per_batch = 20000)
 {
     const int block_size = 256;
     const int grid_size = (num_particles + block_size - 1) / block_size;
-    
-    double *d_init, *d_total_disp, *d_disp, *d_msd_p;
-    
+
+    std::vector<int> sample_steps = generate_log_spaced_steps(num_steps, num_msd_samples);
+    int num_samples = static_cast<int>(sample_steps.size());
+    h_msd_out.assign(num_samples, 0.0);
+    h_msd_sample_times_out.resize(num_samples);
+    for (int k = 0; k < num_samples; ++k) {
+        h_msd_sample_times_out[k] = static_cast<double>(sample_steps[k]) * dt;
+    }
+
+    double *d_init, *d_state_wrapped, *d_state_unwrapped, *d_total_disp, *d_disp, *d_msd_p;
+    int *d_sample_steps;
+
     CUDA_CHECK(cudaMalloc(&d_init, num_particles * DIMS * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_state_wrapped, num_particles * DIMS * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_state_unwrapped, num_particles * DIMS * sizeof(double)));
     CUDA_CHECK(cudaMalloc(&d_total_disp, num_particles * sizeof(double)));
     CUDA_CHECK(cudaMalloc(&d_disp, num_particles * DIMS * sizeof(double)));
-    CUDA_CHECK(cudaMalloc(&d_msd_p, num_steps * sizeof(double)));
-    
-    CUDA_CHECK(cudaMemcpy(d_init, h_initial_conditions, num_particles * DIMS * sizeof(double), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemset(d_msd_p, 0, num_steps * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_msd_p, num_samples * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_sample_steps, num_samples * sizeof(int)));
 
-    // Corrected kernel launch: use 'num_steps' instead of 'max_steps'
-    ode_msd_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
-        system_functor, params, num_steps, dt, num_particles, d_init, d_total_disp, d_disp, d_msd_p);
-    
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(d_init, h_initial_conditions, num_particles * DIMS * sizeof(double), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_state_wrapped, h_initial_conditions, num_particles * DIMS * sizeof(double), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_state_unwrapped, h_initial_conditions, num_particles * DIMS * sizeof(double), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemset(d_msd_p, 0, num_samples * sizeof(double)));
+    CUDA_CHECK(cudaMemcpy(d_sample_steps, sample_steps.data(), num_samples * sizeof(int), cudaMemcpyHostToDevice));
+
+    run_in_batches(num_steps, steps_per_batch, [&](int step_offset, int steps_this_batch) {
+        int sample_start_idx = static_cast<int>(
+            std::lower_bound(sample_steps.begin(), sample_steps.end(), step_offset) - sample_steps.begin());
+
+        ode_msd_kernel<DIMS, SystemType, ParamsType><<<grid_size, block_size>>>(
+            system_functor, params, step_offset, steps_this_batch, dt, num_particles, d_init,
+            d_sample_steps, num_samples, sample_start_idx,
+            d_state_wrapped, d_state_unwrapped, d_total_disp, d_disp, d_msd_p);
+
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+    });
 
     CUDA_CHECK(cudaMemcpy(h_total_displacement, d_total_disp, num_particles * sizeof(double), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(h_displacements, d_disp, num_particles * DIMS * sizeof(double), cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(h_msd, d_msd_p, num_steps * sizeof(double), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_msd_out.data(), d_msd_p, num_samples * sizeof(double), cudaMemcpyDeviceToHost));
 
     // Final normalization on the CPU
-    for (int i = 0; i < num_steps; ++i) {
-        h_msd[i] /= num_particles;
+    for (int k = 0; k < num_samples; ++k) {
+        h_msd_out[k] /= num_particles;
     }
 
     CUDA_CHECK(cudaFree(d_init));
+    CUDA_CHECK(cudaFree(d_state_wrapped));
+    CUDA_CHECK(cudaFree(d_state_unwrapped));
     CUDA_CHECK(cudaFree(d_total_disp));
     CUDA_CHECK(cudaFree(d_disp));
     CUDA_CHECK(cudaFree(d_msd_p));
+    CUDA_CHECK(cudaFree(d_sample_steps));
 }

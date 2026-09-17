@@ -36,6 +36,14 @@
 *.exe
 *.out
 *.app
+/run_horton
+/run_standard_map
+/run_henon_heiles
+/run_pendulum
+/tests/*.o
+/tests/bin/
+/build/
+/docs/
 
 # debug information files
 *.dwo
