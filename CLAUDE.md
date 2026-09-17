@@ -423,6 +423,87 @@ installing a `texlive` package, e.g. `texlive-latex-extra`, needing `sudo`).
 Worked around for testing by setting `usetex=False`; not something to
 silently disable in the actual library code without asking.
 
+## Phase 6: multi-angle code review + fixes (PR #1)
+
+Per the user's request (2026-09-16/17): ran an 8-angle parallel code review
+(line-by-line, removed-behavior, cross-file-tracer, reuse, simplification,
+efficiency, altitude, CLAUDE.md conventions) over the full `origin/main...HEAD`
+diff (52 files, ~4100 insertions), deduped to 10 findings, verified each
+(CONFIRMED/PLAUSIBLE), then fixed, individually verified, and committed all
+10 — no bugs left unfixed. Each commit on `cleanup` has the full
+before/after verification in its message; summary:
+
+1. **`maps/horton.h`**: `jacobian()`'s `kx2`/`kx3` phase constant used
+   `M_PI` where `operator()`'s actual RHS uses `+0.5` — any Lyapunov
+   calculation with `A2`/`A3 != 0` got a wrong analytic Jacobian. Fixed;
+   added a permanent finite-difference regression test
+   (`tests/test_jacobian.cu`, covers all four systems) so this class of bug
+   can't silently recur — verified the test actually catches it by testing
+   an isolated broken copy.
+2. **`cuda_dynamics_lib/include/solvers/ode_msd.cuh`**: the MSD/displacement
+   kernel hardcoded x/y indices regardless of `DIMS`, leaving `Displacement`
+   components 2,3 (px,py) as uninitialized garbage for `DIMS=4` systems
+   (Henon-Heiles). Fixed to write all `DIMS` displacement components while
+   keeping MSD/`TotalDisplacement` position-space-only (first
+   `min(DIMS,2)` components — the physically meaningful choice, matches
+   every system's `(position..., momentum...)` state layout convention).
+   Verified DIMS=2 (Horton) output is checksum-identical before/after.
+3/4. **`Py/plotting_lib.py`**: `generate_mosaic_plot`/
+   `generate_parameter_matrix_plot` still built dataset names at stale
+   `.2f`/`.6f` precision (the generic runner's `enumerate_sweeps()` always
+   uses `.4f`) — fixed. MSD plotting unconditionally read
+   `'MSD_sample_times'`, crashing on `run_map_generic`'s dense (no such
+   dataset) MSD output — added a fallback helper. Also found (not one of
+   the 10 review findings, but discovered while testing #3/#4)
+   `generate_parameter_matrix_plot` referenced an undefined `title`/
+   `plot_title` in every `plot_type` branch — the function was completely
+   non-functional; fixed in the same commit.
+5/10. Added `run_in_batches()` in `cuda_dynamics.h`: a shared helper
+   replacing the hand-rolled, duplicated batch loop in `ode_escape.cuh` and
+   `ode_msd.cuh`, and validating `steps_per_batch > 0` (was an infinite
+   loop on `<= 0`, now throws `std::invalid_argument` immediately).
+6. **`runner.cuh`**: `MSD_sample_times` was only ever saved from the first
+   sweep combination — a later combination sweeping `final_time` or
+   `msd_samples` to a different value got its samples silently mismatched
+   against the first combination's times on read-back. Fixed: later
+   combinations that actually differ get their own
+   `MSD_sample_times_<suffix>` dataset; `plotting_lib.py`'s
+   `_read_msd_sample_times` prefers it when present. (Also discovered
+   `dt` is read once from the raw config *outside* the sweep loop, so
+   sweeping `dt` doesn't actually work in the current design — not fixed,
+   out of scope for this finding, worth knowing if `dt` sweeps are ever
+   wanted.) Verified end-to-end with a real sweep (`msd_samples=10,20`):
+   the differing combination correctly got its own per-combo dataset.
+7. **`save_displacement_components`** (`cuda_dynamics.h`) caught HDF5
+   errors and only logged to stderr instead of rethrowing like
+   `save_to_h5` — a failed write (e.g. duplicate dataset name) would leave
+   the file silently missing data while the driver reported success.
+   Fixed to rethrow; verified with a standalone duplicate-dataset test.
+8. **Lyapunov tangent vector** (`ode_lyapunov.cuh`, `map_lyapunov.cuh`)
+   started as a coordinate basis vector `(1,0,...,0)`, which can coincide
+   with an exact invariant subspace of a system's linearized dynamics for
+   some initial-condition families — e.g. Henon-Heiles' Jacobian decouples
+   into `(x,px)`/`(y,py)` blocks on the `x=px=0` symmetric orbit (a natural
+   choice for a y-py Poincaré-section Lyapunov grid). Changed to an
+   all-ones (normalized) start, which has no such coincidental alignment.
+   Verified a non-degenerate case (Standard Map) is unaffected (1.1282 vs
+   1.1286 mean exponent) and worked through the actual math for the
+   Henon-Heiles degenerate case: its `(y,py)` block alone is a bound 1-DOF
+   system, always exactly integrable (zero confined exponent), so the old
+   basis-vector start — landing entirely in the `(x,px)` block — happened
+   to already capture the equal-or-larger exponent there; this fix removes
+   reliance on that coincidence rather than fixing an active wrong-number
+   bug in Henon-Heiles specifically (documented honestly in the code
+   comment, not overclaimed).
+9. Horton's `v2`/`v3` derivation (`|w2/ky2 - w1/ky1|` etc.) was copy-pasted
+   across `load_params_for<HortonSystemParams>` and three test files.
+   Consolidated into `derive_horton_velocities()` in `maps/horton.h`.
+
+Full test suite (`make test`, 6 binaries / 15 sub-tests) re-verified
+passing after every single fix and once more at the end; all four runners
+(`run_horton`, `run_standard_map`, `run_henon_heiles`, `run_pendulum`)
+rebuilt cleanly throughout. Pushed to `origin/cleanup` (PR #1), 8 commits.
+
 ## Project intent (see also memory: `project-generic-tool-goal`)
 
 This library is meant to be a **generic** CUDA tool for escape-basin/transport
